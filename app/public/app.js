@@ -3,6 +3,7 @@ if (tg) {
   tg.ready();
   tg.expand();
 }
+const telegramUserId = String(tg?.initDataUnsafe?.user?.id || '').trim();
 
 const STORAGE_TOKEN_KEY = 'trade_diary_token';
 
@@ -34,14 +35,36 @@ let lastSeenTradeId = 0;
 let latestTradeId = 0;
 let autoRefreshTimer = null;
 
-function getSeenTradeStorageKey() {
-  const tokenPart = authToken ? authToken.slice(0, 12) : 'guest';
-  return `trade_diary_last_seen_trade_id_${tokenPart}`;
-}
-
 const fmt = (n) => (n === null || n === undefined ? '-' : Number(n).toFixed(4));
 const fmtQty = (n) => (n === null || n === undefined ? '-' : Number(n).toFixed(8));
 const fmtTime = (ms) => (ms ? new Date(Number(ms)).toLocaleString() : '-');
+
+function formatDurationFull(totalSecInput) {
+  let totalSec = Math.max(0, Math.floor(Number(totalSecInput || 0)));
+  const secInMinute = 60;
+  const secInHour = 60 * secInMinute;
+  const secInDay = 24 * secInHour;
+  const secInMonth = 30 * secInDay;
+
+  const months = Math.floor(totalSec / secInMonth);
+  totalSec -= months * secInMonth;
+  const days = Math.floor(totalSec / secInDay);
+  totalSec -= days * secInDay;
+  const hours = Math.floor(totalSec / secInHour);
+  totalSec -= hours * secInHour;
+  const minutes = Math.floor(totalSec / secInMinute);
+  totalSec -= minutes * secInMinute;
+  const seconds = totalSec;
+
+  const parts = [];
+  if (months > 0) parts.push(`${months} мес`);
+  if (days > 0) parts.push(`${days} д`);
+  if (hours > 0) parts.push(`${hours} ч`);
+  if (minutes > 0) parts.push(`${minutes} мин`);
+  if (seconds > 0 || parts.length === 0) parts.push(`${seconds} сек`);
+  return parts.join(' ');
+}
+
 function fmtDuration(trade) {
   if (trade.status === 'OPEN') return 'Открыта';
 
@@ -49,21 +72,12 @@ function fmtDuration(trade) {
   const exit = Number(trade.exit_time || 0);
   if (entry > 0 && exit > entry) {
     const totalSec = Math.max(1, Math.round((exit - entry) / 1000));
-    if (totalSec < 60) return `${totalSec} сек`;
-    const totalMin = Math.floor(totalSec / 60);
-    if (totalMin < 60) return `${totalMin} мин`;
-    const totalHours = Math.floor(totalMin / 60);
-    if (totalHours >= 24) {
-      const days = Math.floor(totalHours / 24);
-      return `${days} д`;
-    }
-    const hours = Math.floor(totalMin / 60);
-    const mins = totalMin % 60;
-    return mins > 0 ? `${hours} ч ${mins} мин` : `${hours} ч`;
+    return formatDurationFull(totalSec);
   }
 
   if (trade.duration_minutes === null || trade.duration_minutes === undefined) return '-';
-  return `${trade.duration_minutes} мин`;
+  const fallbackSec = Math.max(0, Math.round(Number(trade.duration_minutes || 0) * 60));
+  return formatDurationFull(fallbackSec);
 }
 
 function setLoggedOutView() {
@@ -92,7 +106,7 @@ function setLoggedInView(profile) {
   $bottomNav.classList.remove('hidden');
   $profileInfo.textContent = `Аккаунт: ${profile.api_key_masked} (${profile.base_url})`;
   $profileSettingsPanel.classList.add('hidden');
-  lastSeenTradeId = Number(localStorage.getItem(getSeenTradeStorageKey()) || 0);
+  lastSeenTradeId = Number(profile.last_read_trade_id || 0);
   setActiveTab('history');
   startAutoRefreshLoop();
 }
@@ -156,12 +170,6 @@ async function loadTrades() {
     return !(isDustFix || isAllZero);
   });
   latestTradeId = visibleTrades.length ? Math.max(...visibleTrades.map((t) => Number(t.id || 0))) : 0;
-  const seenKey = getSeenTradeStorageKey();
-  const hasSeenBefore = localStorage.getItem(seenKey) !== null;
-  if (!hasSeenBefore && latestTradeId > 0) {
-    lastSeenTradeId = latestTradeId;
-    localStorage.setItem(seenKey, String(lastSeenTradeId));
-  }
   const unreadCount = visibleTrades.filter((t) => Number(t.id || 0) > lastSeenTradeId).length;
   const unreadTrades = visibleTrades.filter((t) => Number(t.id || 0) > lastSeenTradeId);
   const readTrades = visibleTrades.filter((t) => Number(t.id || 0) <= lastSeenTradeId);
@@ -269,10 +277,13 @@ function setNewTradesIndicator(count) {
 
 function markAllTradesAsRead() {
   if (latestTradeId <= 0) return;
-  lastSeenTradeId = latestTradeId;
-  localStorage.setItem(getSeenTradeStorageKey(), String(lastSeenTradeId));
-  setNewTradesIndicator(0);
-  loadTrades().catch(() => {});
+  api('/api/trades/mark-read', { method: 'POST' })
+    .then((result) => {
+      lastSeenTradeId = Number(result.last_read_trade_id || latestTradeId);
+      setNewTradesIndicator(0);
+      return loadTrades();
+    })
+    .catch(() => {});
 }
 
 async function autoSyncAndRefresh() {
@@ -309,6 +320,7 @@ $authForm.addEventListener('submit', async (e) => {
     const payload = {
       api_key: $authForm.elements.api_key.value.trim(),
       api_secret: $authForm.elements.api_secret.value.trim(),
+      tg_user_id: telegramUserId || undefined,
     };
 
     const result = await api('/api/auth/register', {
@@ -381,9 +393,21 @@ async function bootstrap() {
     setLoggedInView(profile);
     await autoSyncAndRefresh();
   } catch (_err) {
-    authToken = '';
-    localStorage.removeItem(STORAGE_TOKEN_KEY);
-    setLoggedOutView();
+    try {
+      if (!telegramUserId) throw new Error('no telegram user');
+      const tgLogin = await api('/api/auth/telegram-login', {
+        method: 'POST',
+        body: JSON.stringify({ tg_user_id: telegramUserId }),
+      });
+      authToken = tgLogin.token;
+      localStorage.setItem(STORAGE_TOKEN_KEY, authToken);
+      setLoggedInView(tgLogin.profile);
+      await autoSyncAndRefresh();
+    } catch (_err2) {
+      authToken = '';
+      localStorage.removeItem(STORAGE_TOKEN_KEY);
+      setLoggedOutView();
+    }
   }
 }
 

@@ -19,10 +19,12 @@ async function getDb() {
       CREATE TABLE IF NOT EXISTS profiles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         public_id TEXT NOT NULL UNIQUE,
+        tg_user_id TEXT,
         api_key TEXT NOT NULL UNIQUE,
         api_secret TEXT NOT NULL,
         base_url TEXT NOT NULL,
         recv_window INTEGER NOT NULL DEFAULT 5000,
+        last_read_trade_id INTEGER NOT NULL DEFAULT 0,
         last_sync_at INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL
       );
@@ -51,6 +53,7 @@ async function getDb() {
       );
 
       CREATE INDEX IF NOT EXISTS idx_profiles_public_id ON profiles(public_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_tg_user_id ON profiles(tg_user_id);
       DROP INDEX IF EXISTS idx_trades_buy_exec_id;
       CREATE INDEX IF NOT EXISTS idx_trades_buy_exec_id ON trades(buy_exec_id);
       CREATE INDEX IF NOT EXISTS idx_trades_symbol_status ON trades(symbol, status);
@@ -68,6 +71,16 @@ async function getDb() {
     const hasLastSyncAt = profileColumns.some((c) => c.name === 'last_sync_at');
     if (!hasLastSyncAt) {
       await db.exec(`ALTER TABLE profiles ADD COLUMN last_sync_at INTEGER NOT NULL DEFAULT 0`);
+    }
+    const hasLastReadTradeId = profileColumns.some((c) => c.name === 'last_read_trade_id');
+    if (!hasLastReadTradeId) {
+      await db.exec(`ALTER TABLE profiles ADD COLUMN last_read_trade_id INTEGER NOT NULL DEFAULT 0`);
+    }
+
+    const hasTgUserId = profileColumns.some((c) => c.name === 'tg_user_id');
+    if (!hasTgUserId) {
+      await db.exec(`ALTER TABLE profiles ADD COLUMN tg_user_id TEXT`);
+      await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_tg_user_id ON profiles(tg_user_id)`);
     }
   }
 

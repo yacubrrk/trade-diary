@@ -342,7 +342,8 @@ function normalizeExecutions(executions) {
         execQty: 0,
         execFee: 0,
         quoteSum: 0,
-        execTime,
+        minExecTime: execTime,
+        maxExecTime: execTime,
       });
     }
 
@@ -350,7 +351,8 @@ function normalizeExecutions(executions) {
     g.execQty += qty;
     g.execFee += fee;
     g.quoteSum += quote;
-    if (execTime > g.execTime) g.execTime = execTime;
+    if (execTime < g.minExecTime) g.minExecTime = execTime;
+    if (execTime > g.maxExecTime) g.maxExecTime = execTime;
   }
 
   return Array.from(groups.values())
@@ -362,7 +364,7 @@ function normalizeExecutions(executions) {
       execQty: roundQty(g.execQty),
       execFee: roundMoney(g.execFee),
       execPrice: g.execQty > 0 ? g.quoteSum / g.execQty : 0,
-      execTime: g.execTime,
+      execTime: g.side === 'BUY' ? g.minExecTime : g.maxExecTime,
     }))
     .sort((a, b) => toNum(a.execTime) - toNum(b.execTime));
 }
@@ -472,6 +474,18 @@ async function syncBybitForProfileIfStale(db, profile, days = AUTO_SYNC_DAYS) {
   return syncBybitForProfile(db, profile, days);
 }
 
+async function repairInvalidTradeTimes(db) {
+  const result = await db.run(
+    `UPDATE trades
+     SET exit_time = entry_time,
+         duration_minutes = 0
+     WHERE exit_time IS NOT NULL
+       AND entry_time IS NOT NULL
+       AND exit_time < entry_time`
+  );
+  return Number(result.changes || 0);
+}
+
 let autoSyncRunning = false;
 async function runAutoSync() {
   if (autoSyncRunning) return;
@@ -502,6 +516,7 @@ app.post('/api/auth/register', async (req, res) => {
     const apiSecret = String(req.body.api_secret || '').trim();
     const baseUrl = String(req.body.base_url || 'https://api.bybit.com').trim();
     const recvWindow = Math.max(1000, Math.min(15000, Number(req.body.recv_window || 5000)));
+    const tgUserId = String(req.body.tg_user_id || '').trim() || null;
 
     if (!apiKey || !apiSecret) {
       return res.status(400).json({ error: 'api_key and api_secret are required' });
@@ -512,9 +527,9 @@ app.post('/api/auth/register', async (req, res) => {
     if (existing) {
       await db.run(
         `UPDATE profiles
-         SET api_secret = ?, base_url = ?, recv_window = ?
+         SET api_secret = ?, base_url = ?, recv_window = ?, tg_user_id = COALESCE(?, tg_user_id)
          WHERE id = ?`,
-        [apiSecret, baseUrl, recvWindow, existing.id]
+        [apiSecret, baseUrl, recvWindow, tgUserId, existing.id]
       );
       setAuthCookie(res, existing.public_id);
       const refreshed = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [existing.id]);
@@ -528,6 +543,7 @@ app.post('/api/auth/register', async (req, res) => {
           id: existing.id,
           api_key_masked: `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`,
           base_url: baseUrl,
+          last_read_trade_id: Number(existing.last_read_trade_id || 0),
         },
       });
     }
@@ -536,9 +552,9 @@ app.post('/api/auth/register', async (req, res) => {
     const now = Date.now();
 
     const result = await db.run(
-      `INSERT INTO profiles (public_id, api_key, api_secret, base_url, recv_window, last_sync_at, created_at)
-       VALUES (?, ?, ?, ?, ?, 0, ?)`,
-      [publicId, apiKey, apiSecret, baseUrl, recvWindow, now]
+      `INSERT INTO profiles (public_id, tg_user_id, api_key, api_secret, base_url, recv_window, last_sync_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
+      [publicId, tgUserId, apiKey, apiSecret, baseUrl, recvWindow, now]
     );
     setAuthCookie(res, publicId);
     const createdProfile = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [result.lastID]);
@@ -552,6 +568,7 @@ app.post('/api/auth/register', async (req, res) => {
         id: result.lastID,
         api_key_masked: `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`,
         base_url: baseUrl,
+        last_read_trade_id: 0,
       },
     });
   } catch (err) {
@@ -565,7 +582,37 @@ app.get('/api/auth/me', requireProfile, async (req, res) => {
     id: req.profile.id,
     api_key_masked: apiKey ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}` : '',
     base_url: req.profile.base_url,
+    last_read_trade_id: Number(req.profile.last_read_trade_id || 0),
   });
+});
+
+app.post('/api/auth/telegram-login', async (req, res) => {
+  try {
+    const db = await getDb();
+    const tgUserId = String(req.body.tg_user_id || '').trim();
+    if (!tgUserId) {
+      return res.status(400).json({ error: 'tg_user_id is required' });
+    }
+
+    const profile = await db.get('SELECT * FROM profiles WHERE tg_user_id = ? LIMIT 1', [tgUserId]);
+    if (!profile) {
+      return res.status(404).json({ error: 'Profile not found for Telegram user' });
+    }
+
+    setAuthCookie(res, profile.public_id);
+    const apiKey = String(profile.api_key || '');
+    return res.json({
+      token: profile.public_id,
+      profile: {
+        id: profile.id,
+        api_key_masked: apiKey ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}` : '',
+        base_url: profile.base_url,
+        last_read_trade_id: Number(profile.last_read_trade_id || 0),
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/auth/logout', (_req, res) => {
@@ -685,8 +732,30 @@ app.post('/api/bybit/auto-sync', requireProfile, async (req, res) => {
   }
 });
 
+app.post('/api/trades/mark-read', requireProfile, async (req, res) => {
+  try {
+    const db = await getDb();
+    const maxRow = await db.get('SELECT COALESCE(MAX(id), 0) as max_id FROM trades WHERE owner_profile_id = ?', [
+      req.profile.id,
+    ]);
+    const maxId = Number(maxRow?.max_id || 0);
+    await db.run('UPDATE profiles SET last_read_trade_id = ? WHERE id = ?', [maxId, req.profile.id]);
+    res.json({ ok: true, last_read_trade_id: maxId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server started: http://localhost:${PORT}`);
+  getDb()
+    .then((db) => repairInvalidTradeTimes(db))
+    .then((fixed) => {
+      if (fixed > 0) {
+        console.log(`[repair] fixed invalid trade times: ${fixed}`);
+      }
+    })
+    .catch((err) => console.error(`[repair] failed: ${err.message}`));
   if (AUTO_SYNC_ENABLED) {
     runAutoSync().catch((err) => console.error(`[auto-sync] initial failed: ${err.message}`));
     setInterval(() => {
