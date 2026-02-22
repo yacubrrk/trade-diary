@@ -14,6 +14,10 @@ async function fetchBybitExecutions({
   endTime,
   limit = 200,
 }) {
+  const cleanApiKey = String(apiKey || '').trim();
+  const cleanApiSecret = String(apiSecret || '').trim();
+  const cleanBaseUrl = String(baseUrl || '').trim();
+
   const timestamp = Date.now().toString();
   const params = new URLSearchParams({
     category: 'spot',
@@ -24,14 +28,21 @@ async function fetchBybitExecutions({
   if (endTime) params.set('endTime', String(endTime));
 
   const queryString = params.toString();
-  const sign = signBybit({ apiKey, apiSecret, recvWindow, queryString, timestamp });
+  const sign = signBybit({
+    apiKey: cleanApiKey,
+    apiSecret: cleanApiSecret,
+    recvWindow,
+    queryString,
+    timestamp,
+  });
 
-  const res = await fetch(`${baseUrl}/v5/execution/list?${queryString}`, {
+  const res = await fetch(`${cleanBaseUrl}/v5/execution/list?${queryString}`, {
     method: 'GET',
     headers: {
-      'X-BAPI-API-KEY': apiKey,
+      'X-BAPI-API-KEY': cleanApiKey,
       'X-BAPI-TIMESTAMP': timestamp,
       'X-BAPI-RECV-WINDOW': String(recvWindow),
+      'X-BAPI-SIGN-TYPE': '2',
       'X-BAPI-SIGN': sign,
     },
   });
