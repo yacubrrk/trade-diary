@@ -105,7 +105,18 @@ async function loadStats() {
 
 async function loadTrades() {
   const trades = await api('/api/trades');
-  $tbody.innerHTML = trades
+  const visibleTrades = trades.filter((t) => {
+    const isDustFix = String(t.source || '').toLowerCase() === 'bybit_dust_fix';
+    const isAllZero =
+      Number(t.qty || 0) === 0 &&
+      Number(t.invested_usdt || 0) === 0 &&
+      Number(t.received_usdt || 0) === 0 &&
+      Number(t.pl_usdt || 0) === 0 &&
+      Number(t.pl_percent || 0) === 0;
+    return !(isDustFix || isAllZero);
+  });
+
+  $tbody.innerHTML = visibleTrades
     .map((t) => {
       const pl = t.pl_usdt;
       const plClass = pl === null ? '' : pl >= 0 ? 'good' : 'bad';
