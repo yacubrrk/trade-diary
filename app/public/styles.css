@@ -537,6 +537,14 @@ button.is-loading::after {
   font-weight: 800;
 }
 
+.history-tab-badge.hidden {
+  display: none;
+}
+
+.new-trades-pill.hidden {
+  display: none;
+}
+
 .nav-btn.active {
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
   color: #2a1b00;
