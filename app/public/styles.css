@@ -7,8 +7,8 @@
   --card-strong: rgba(255, 255, 255, 0.9);
   --text: #13281f;
   --muted: #4f6a5c;
-  --accent: #1f8a5a;
-  --accent-strong: #176c46;
+  --accent: #ffbf2f;
+  --accent-strong: #f08d1a;
   --good: #108447;
   --bad: #b42f43;
   --line: rgba(31, 138, 90, 0.16);
@@ -218,7 +218,7 @@ select:focus {
 
 button {
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
-  color: #fff;
+  color: #2a1b00;
   border: none;
   cursor: pointer;
   align-self: end;
@@ -262,6 +262,116 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--card-strong);
+}
+
+.mobile-trades {
+  display: none;
+}
+
+.trade-item {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.trade-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.trade-item-symbol {
+  font-weight: 800;
+  font-size: 15px;
+}
+
+.trade-item-status {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.trade-item-pl {
+  font-weight: 800;
+}
+
+.trade-item-meta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.trade-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(9, 22, 16, 0.48);
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  z-index: 50;
+}
+
+.trade-modal.hidden {
+  display: none;
+}
+
+.trade-modal-card {
+  width: min(560px, 100%);
+  max-height: 88vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  padding: 12px;
+}
+
+.trade-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.trade-modal-head h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.modal-close {
+  padding: 8px 10px;
+  border-radius: 8px;
+  width: auto;
+}
+
+.trade-modal-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.trade-modal-row {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px;
+  background: #fbfffc;
+}
+
+.trade-modal-row .k {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.trade-modal-row .v {
+  margin-top: 3px;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 table {
@@ -343,5 +453,21 @@ small {
 
   button {
     width: 100%;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .table-wrap {
+    display: none;
+  }
+
+  .mobile-trades {
+    display: block;
+  }
+
+  .trade-modal-grid {
+    grid-template-columns: 1fr;
   }
 }

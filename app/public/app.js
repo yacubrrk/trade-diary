@@ -15,8 +15,13 @@ const $changeKeysBtn = document.getElementById('change-keys-btn');
 
 const $stats = document.getElementById('stats');
 const $tbody = document.getElementById('trades-body');
+const $mobileTrades = document.getElementById('mobile-trades');
 const $syncBtn = document.getElementById('sync-btn');
 const $syncDays = document.getElementById('sync-days');
+const $tradeModal = document.getElementById('trade-modal');
+const $tradeModalTitle = document.getElementById('trade-modal-title');
+const $tradeModalGrid = document.getElementById('trade-modal-grid');
+const $tradeModalClose = document.getElementById('trade-modal-close');
 
 let authToken = localStorage.getItem(STORAGE_TOKEN_KEY) || '';
 
@@ -52,6 +57,7 @@ function setLoggedOutView() {
   $appSections.classList.add('hidden');
   $profileCard.classList.add('hidden');
   $tbody.innerHTML = '';
+  $mobileTrades.innerHTML = '';
   $stats.innerHTML = '';
 }
 
@@ -144,6 +150,38 @@ async function loadTrades() {
       `;
     })
     .join('');
+
+  $mobileTrades.innerHTML = visibleTrades
+    .map((t) => {
+      const pl = Number(t.pl_usdt);
+      const plClass = Number.isFinite(pl) ? (pl >= 0 ? 'good' : 'bad') : '';
+      return `
+        <article class="trade-item" data-trade-id="${t.id}">
+          <div class="trade-item-top">
+            <div>
+              <div class="trade-item-symbol">${t.symbol}</div>
+              <div class="trade-item-status">${t.status}</div>
+            </div>
+            <div class="trade-item-pl ${plClass}">${fmt(t.pl_usdt)} USDT</div>
+          </div>
+          <div class="trade-item-meta">
+            <span>Вход: ${fmt(t.entry_price)}</span>
+            <span>Выход: ${t.exit_price ? fmt(t.exit_price) : '-'}</span>
+            <span>Длит.: ${fmtDuration(t)}</span>
+          </div>
+        </article>
+      `;
+    })
+    .join('');
+
+  $mobileTrades.querySelectorAll('.trade-item').forEach((item) => {
+    item.addEventListener('click', () => {
+      const tradeId = Number(item.getAttribute('data-trade-id'));
+      const trade = visibleTrades.find((x) => x.id === tradeId);
+      if (!trade) return;
+      openTradeModal(trade);
+    });
+  });
 }
 
 async function refreshAll() {
@@ -203,6 +241,36 @@ $syncBtn.addEventListener('click', async () => {
     $syncBtn.disabled = false;
     $syncBtn.textContent = 'Синхронизировать';
   }
+});
+
+function openTradeModal(t) {
+  const plClass = Number(t.pl_usdt) >= 0 ? 'good' : 'bad';
+  $tradeModalTitle.textContent = `${t.symbol} #${t.id}`;
+  $tradeModalGrid.innerHTML = `
+    <div class="trade-modal-row"><div class="k">Статус</div><div class="v">${t.status}</div></div>
+    <div class="trade-modal-row"><div class="k">Источник</div><div class="v">${t.source}</div></div>
+    <div class="trade-modal-row"><div class="k">Количество</div><div class="v">${fmtQty(t.qty)}</div></div>
+    <div class="trade-modal-row"><div class="k">Цена входа</div><div class="v">${fmt(t.entry_price)}</div></div>
+    <div class="trade-modal-row"><div class="k">Цена выхода</div><div class="v">${t.exit_price ? fmt(t.exit_price) : '-'}</div></div>
+    <div class="trade-modal-row"><div class="k">Комиссия</div><div class="v">${fmt(t.commission_usdt)}</div></div>
+    <div class="trade-modal-row"><div class="k">Сумма входа</div><div class="v">${fmt(t.invested_usdt)}</div></div>
+    <div class="trade-modal-row"><div class="k">Сумма выхода</div><div class="v">${fmt(t.received_usdt)}</div></div>
+    <div class="trade-modal-row"><div class="k">P/L USDT</div><div class="v ${plClass}">${fmt(t.pl_usdt)}</div></div>
+    <div class="trade-modal-row"><div class="k">P/L %</div><div class="v ${plClass}">${fmt(t.pl_percent)}</div></div>
+    <div class="trade-modal-row"><div class="k">Вход</div><div class="v">${fmtTime(t.entry_time)}</div></div>
+    <div class="trade-modal-row"><div class="k">Выход</div><div class="v">${fmtTime(t.exit_time)}</div></div>
+    <div class="trade-modal-row"><div class="k">Длительность</div><div class="v">${fmtDuration(t)}</div></div>
+  `;
+  $tradeModal.classList.remove('hidden');
+}
+
+function closeTradeModal() {
+  $tradeModal.classList.add('hidden');
+}
+
+$tradeModalClose.addEventListener('click', closeTradeModal);
+$tradeModal.addEventListener('click', (e) => {
+  if (e.target === $tradeModal) closeTradeModal();
 });
 
 async function bootstrap() {

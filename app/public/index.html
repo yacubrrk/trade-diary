@@ -55,6 +55,7 @@
 
         <section class="card">
           <h2>Таблица сделок</h2>
+          <div class="mobile-trades hidden" id="mobile-trades"></div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -69,17 +70,27 @@
                   <th>Сумма выхода</th>
                   <th>Комиссия</th>
                   <th>P/L USDT</th>
-                <th>P/L %</th>
-                <th>Длительность</th>
-                <th>Источник</th>
-              </tr>
-            </thead>
+                  <th>P/L %</th>
+                  <th>Длительность</th>
+                  <th>Источник</th>
+                </tr>
+              </thead>
               <tbody id="trades-body"></tbody>
             </table>
           </div>
         </section>
       </div>
     </main>
+
+    <div class="trade-modal hidden" id="trade-modal">
+      <div class="trade-modal-card">
+        <div class="trade-modal-head">
+          <h3 id="trade-modal-title">Сделка</h3>
+          <button id="trade-modal-close" class="modal-close" type="button">Закрыть</button>
+        </div>
+        <div class="trade-modal-grid" id="trade-modal-grid"></div>
+      </div>
+    </div>
 
     <script src="/app.js"></script>
   </body>
