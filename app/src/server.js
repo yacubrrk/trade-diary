@@ -4,7 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { getDb } = require('./db');
-const { fetchBybitExecutions } = require('./bybit');
+const { fetchBybitExecutions, fetchBybitWalletBalance, fetchBybitP2POrders } = require('./bybit');
 
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
@@ -741,6 +741,86 @@ app.post('/api/trades/mark-read', requireProfile, async (req, res) => {
     const maxId = Number(maxRow?.max_id || 0);
     await db.run('UPDATE profiles SET last_read_trade_id = ? WHERE id = ?', [maxId, req.profile.id]);
     res.json({ ok: true, last_read_trade_id: maxId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/balance', requireProfile, async (req, res) => {
+  try {
+    const result = await fetchBybitWalletBalance({
+      apiKey: req.profile.api_key,
+      apiSecret: req.profile.api_secret,
+      baseUrl: req.profile.base_url || 'https://api.bybit.com',
+      recvWindow: Number(req.profile.recv_window || 5000),
+    });
+
+    const unifiedCoins = Array.isArray(result.unified?.coin) ? result.unified.coin : [];
+    const nonZeroUnified = unifiedCoins
+      .map((c) => ({
+        coin: c.coin,
+        wallet_balance: toNum(c.walletBalance),
+        available_to_withdraw: toNum(c.availableToWithdraw),
+        locked: toNum(c.locked),
+        usd_value: toNum(c.usdValue),
+      }))
+      .filter((c) => c.wallet_balance > 0 || c.locked > 0 || c.usd_value > 0)
+      .sort((a, b) => b.usd_value - a.usd_value);
+
+    const fundCoins = Array.isArray(result.fund?.balance)
+      ? result.fund.balance
+          .map((c) => ({
+            coin: c.coin,
+            transfer_balance: toNum(c.transferBalance),
+            wallet_balance: toNum(c.walletBalance),
+          }))
+          .filter((c) => c.transfer_balance > 0 || c.wallet_balance > 0)
+      : [];
+
+    res.json({
+      unified_total_usd: toNum(result.unified?.totalEquity),
+      unified_coins: nonZeroUnified,
+      fund_coins: fundCoins,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/p2p/orders', requireProfile, async (req, res) => {
+  try {
+    const days = Math.max(1, Math.min(30, Number(req.query.days || 7)));
+    const endTime = Date.now();
+    const beginTime = endTime - days * 24 * 60 * 60 * 1000;
+
+    const result = await fetchBybitP2POrders({
+      apiKey: req.profile.api_key,
+      apiSecret: req.profile.api_secret,
+      baseUrl: req.profile.base_url || 'https://api.bybit.com',
+      recvWindow: Number(req.profile.recv_window || 5000),
+      page: 1,
+      size: 30,
+      beginTime,
+      endTime,
+    });
+
+    const rows = (result.items || []).map((it) => ({
+      id: it.id || it.orderId || '',
+      token: it.tokenId || it.currencyId || '',
+      side: it.side || '',
+      fiat: it.currency || '',
+      amount: toNum(it.amount),
+      total_price: toNum(it.totalPrice),
+      price: toNum(it.price),
+      status: it.status || '',
+      created_time: toNum(it.createDate || it.createTime || it.createdTime),
+      finished_time: toNum(it.finishDate || it.finishTime || it.finishedTime),
+    }));
+
+    res.json({
+      total: Number(result.count || rows.length),
+      rows,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

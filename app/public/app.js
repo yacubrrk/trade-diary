@@ -21,8 +21,11 @@ const $tabHistory = document.getElementById('tab-history');
 const $tabProfile = document.getElementById('tab-profile');
 
 const $stats = document.getElementById('stats');
+const $balanceSummary = document.getElementById('balance-summary');
+const $balanceList = document.getElementById('balance-list');
 const $tbody = document.getElementById('trades-body');
 const $mobileTrades = document.getElementById('mobile-trades');
+const $p2pList = document.getElementById('p2p-list');
 const $tradeModal = document.getElementById('trade-modal');
 const $tradeModalTitle = document.getElementById('trade-modal-title');
 const $tradeModalGrid = document.getElementById('trade-modal-grid');
@@ -259,7 +262,7 @@ async function loadTrades() {
 }
 
 async function refreshAll() {
-  await Promise.all([loadStats(), loadTrades()]);
+  await Promise.all([loadStats(), loadTrades(), loadBalance(), loadP2POrders()]);
 }
 
 function setNewTradesIndicator(count) {
@@ -272,6 +275,72 @@ function setNewTradesIndicator(count) {
   } else {
     $newTradesPill.classList.add('hidden');
     $historyTabBadge.classList.add('hidden');
+  }
+}
+
+async function loadBalance() {
+  try {
+    const data = await api('/api/balance');
+    const total = Number(data.unified_total_usd || 0).toFixed(2);
+    $balanceSummary.textContent = `Общий баланс (USD): ${total}`;
+
+    const unifiedRows = (data.unified_coins || []).slice(0, 12).map(
+      (c) => `
+        <div class="balance-item">
+          <div class="coin">${c.coin}</div>
+          <div class="val">${Number(c.wallet_balance || 0).toFixed(6)}</div>
+          <div class="sub">$${Number(c.usd_value || 0).toFixed(2)}</div>
+        </div>
+      `
+    );
+    const fundRows = (data.fund_coins || []).slice(0, 8).map(
+      (c) => `
+        <div class="balance-item balance-fund">
+          <div class="coin">${c.coin} (FUND)</div>
+          <div class="val">${Number(c.wallet_balance || c.transfer_balance || 0).toFixed(6)}</div>
+          <div class="sub">Funding</div>
+        </div>
+      `
+    );
+
+    const rows = [...unifiedRows, ...fundRows];
+    $balanceList.innerHTML = rows.length ? rows.join('') : '<div class="hint">Ненулевых балансов не найдено</div>';
+  } catch (err) {
+    $balanceSummary.textContent = 'Баланс недоступен';
+    $balanceList.innerHTML = `<div class="hint">${err.message}</div>`;
+  }
+}
+
+async function loadP2POrders() {
+  try {
+    const data = await api('/api/p2p/orders?days=7');
+    const rows = data.rows || [];
+    if (!rows.length) {
+      $p2pList.innerHTML = '<div class="hint">За последние 7 дней P2P сделок нет</div>';
+      return;
+    }
+
+    $p2pList.innerHTML = rows
+      .slice(0, 20)
+      .map(
+        (r) => `
+          <article class="p2p-item">
+            <div class="top">
+              <strong>${r.token || '-'}/${r.fiat || '-'}</strong>
+              <span>${r.side || '-'}</span>
+            </div>
+            <div class="meta">
+              <span>Сумма: ${Number(r.amount || 0).toFixed(4)}</span>
+              <span>Цена: ${Number(r.price || 0).toFixed(4)}</span>
+              <span>Итого: ${Number(r.total_price || 0).toFixed(2)}</span>
+              <span>Статус: ${r.status || '-'}</span>
+            </div>
+          </article>
+        `
+      )
+      .join('');
+  } catch (err) {
+    $p2pList.innerHTML = `<div class="hint">${err.message}</div>`;
   }
 }
 
