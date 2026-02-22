@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Дневник сделок</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Дневник сделок (Bybit Spot)</h1>
+
+      <section class="card stats-grid" id="stats"></section>
+
+      <section class="card">
+        <h2>Добавить сделку вручную</h2>
+        <form id="trade-form" class="grid-form">
+          <label>
+            Токен (пример: BTCUSDT)
+            <input type="text" name="symbol" required />
+          </label>
+          <label>
+            Количество
+            <input type="number" name="qty" step="0.000001" min="0" required />
+          </label>
+          <label>
+            Цена входа
+            <input type="number" name="entry_price" step="0.000001" min="0" required />
+          </label>
+          <label>
+            Комиссия входа (USDT)
+            <input type="number" name="commission_usdt" step="0.000001" min="0" value="0" />
+          </label>
+          <label>
+            Цена выхода (если уже закрыта)
+            <input type="number" name="exit_price" step="0.000001" min="0" />
+          </label>
+          <label>
+            Время входа
+            <input type="datetime-local" name="entry_time" required />
+          </label>
+          <label>
+            Время выхода (если есть)
+            <input type="datetime-local" name="exit_time" />
+          </label>
+          <button type="submit">Сохранить сделку</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Синхронизация с Bybit</h2>
+        <div class="sync-row">
+          <label>
+            За сколько дней подтянуть сделки
+            <input type="number" id="sync-days" value="7" min="1" max="30" />
+          </label>
+          <button id="sync-btn">Синхронизировать</button>
+        </div>
+        <p class="hint">Для работы нужны API ключи в файле .env</p>
+      </section>
+
+      <section class="card">
+        <h2>Таблица сделок</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Токен</th>
+                <th>Статус</th>
+                <th>Кол-во</th>
+                <th>Вход</th>
+                <th>Выход</th>
+                <th>Сумма входа</th>
+                <th>Сумма выхода</th>
+                <th>Комиссия</th>
+                <th>P/L USDT</th>
+                <th>P/L %</th>
+                <th>Длительность</th>
+                <th>Источник</th>
+                <th>Действие</th>
+              </tr>
+            </thead>
+            <tbody id="trades-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
