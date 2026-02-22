@@ -11,7 +11,6 @@ const $authCard = document.getElementById('auth-card');
 const $authForm = document.getElementById('auth-form');
 const $appSections = document.getElementById('app-sections');
 const $spotView = document.getElementById('spot-view');
-const $balanceView = document.getElementById('balance-view');
 const $p2pView = document.getElementById('p2p-view');
 const $profileView = document.getElementById('profile-view');
 const $profileInfo = document.getElementById('profile-info');
@@ -20,13 +19,10 @@ const $profileSettingsBtn = document.getElementById('profile-settings-btn');
 const $profileSettingsPanel = document.getElementById('profile-settings-panel');
 const $bottomNav = document.getElementById('bottom-nav');
 const $tabSpot = document.getElementById('tab-spot');
-const $tabBalance = document.getElementById('tab-balance');
 const $tabP2P = document.getElementById('tab-p2p');
 const $tabProfile = document.getElementById('tab-profile');
 
 const $stats = document.getElementById('stats');
-const $balanceSummary = document.getElementById('balance-summary');
-const $balanceList = document.getElementById('balance-list');
 const $tbody = document.getElementById('trades-body');
 const $mobileTrades = document.getElementById('mobile-trades');
 const $p2pList = document.getElementById('p2p-list');
@@ -101,11 +97,9 @@ function setLoggedOutView() {
 
 function setActiveTab(tab) {
   $spotView.classList.toggle('hidden', tab !== 'spot');
-  $balanceView.classList.toggle('hidden', tab !== 'balance');
   $p2pView.classList.toggle('hidden', tab !== 'p2p');
   $profileView.classList.toggle('hidden', tab !== 'profile');
   $tabSpot.classList.toggle('active', tab === 'spot');
-  $tabBalance.classList.toggle('active', tab === 'balance');
   $tabP2P.classList.toggle('active', tab === 'p2p');
   $tabProfile.classList.toggle('active', tab === 'profile');
 }
@@ -269,7 +263,7 @@ async function loadTrades() {
 }
 
 async function refreshAll() {
-  await Promise.all([loadStats(), loadTrades(), loadBalance(), loadP2POrders()]);
+  await Promise.all([loadStats(), loadTrades(), loadP2POrders()]);
 }
 
 function setNewTradesIndicator(count) {
@@ -282,39 +276,6 @@ function setNewTradesIndicator(count) {
   } else {
     $newTradesPill.classList.add('hidden');
     $spotTabBadge.classList.add('hidden');
-  }
-}
-
-async function loadBalance() {
-  try {
-    const data = await api('/api/balance');
-    const total = Number(data.unified_total_usd || 0).toFixed(2);
-    $balanceSummary.textContent = `Общий баланс (USD): ${total}`;
-
-    const unifiedRows = (data.unified_coins || []).slice(0, 12).map(
-      (c) => `
-        <div class="balance-item">
-          <div class="coin">${c.coin}</div>
-          <div class="val">${Number(c.wallet_balance || 0).toFixed(6)}</div>
-          <div class="sub">$${Number(c.usd_value || 0).toFixed(2)}</div>
-        </div>
-      `
-    );
-    const fundRows = (data.fund_coins || []).slice(0, 8).map(
-      (c) => `
-        <div class="balance-item balance-fund">
-          <div class="coin">${c.coin} (FUND)</div>
-          <div class="val">${Number(c.wallet_balance || c.transfer_balance || 0).toFixed(6)}</div>
-          <div class="sub">Funding</div>
-        </div>
-      `
-    );
-
-    const rows = [...unifiedRows, ...fundRows];
-    $balanceList.innerHTML = rows.length ? rows.join('') : '<div class="hint">Ненулевых балансов не найдено</div>';
-  } catch (err) {
-    $balanceSummary.textContent = 'Баланс недоступен';
-    $balanceList.innerHTML = `<div class="hint">${err.message}</div>`;
   }
 }
 
@@ -469,7 +430,6 @@ $tradeModal.addEventListener('click', (e) => {
 });
 
 $tabSpot.addEventListener('click', () => setActiveTab('spot'));
-$tabBalance.addEventListener('click', () => setActiveTab('balance'));
 $tabP2P.addEventListener('click', () => setActiveTab('p2p'));
 $tabProfile.addEventListener('click', () => setActiveTab('profile'));
 
