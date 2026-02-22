@@ -6,8 +6,12 @@ let db;
 
 async function getDb() {
   if (!db) {
+    const dbPath =
+      process.env.SQLITE_PATH ||
+      path.join(__dirname, '..', 'data', 'trades.db');
+
     db = await open({
-      filename: path.join(__dirname, '..', 'data', 'trades.db'),
+      filename: dbPath,
       driver: sqlite3.Database,
     });
 
