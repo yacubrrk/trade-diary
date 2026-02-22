@@ -514,6 +514,7 @@ app.post('/api/auth/register', async (req, res) => {
     const db = await getDb();
     const apiKey = String(req.body.api_key || '').trim();
     const apiSecret = String(req.body.api_secret || '').trim();
+    const profileName = String(req.body.profile_name || '').trim();
     const baseUrl = String(req.body.base_url || 'https://api.bybit.com').trim();
     const recvWindow = Math.max(1000, Math.min(15000, Number(req.body.recv_window || 5000)));
     const tgUserId = String(req.body.tg_user_id || '').trim() || null;
@@ -527,9 +528,9 @@ app.post('/api/auth/register', async (req, res) => {
     if (existing) {
       await db.run(
         `UPDATE profiles
-         SET api_secret = ?, base_url = ?, recv_window = ?, tg_user_id = COALESCE(?, tg_user_id)
+         SET api_secret = ?, base_url = ?, recv_window = ?, tg_user_id = COALESCE(?, tg_user_id), profile_name = COALESCE(NULLIF(?, ''), profile_name)
          WHERE id = ?`,
-        [apiSecret, baseUrl, recvWindow, tgUserId, existing.id]
+        [apiSecret, baseUrl, recvWindow, tgUserId, profileName, existing.id]
       );
       setAuthCookie(res, existing.public_id);
       const refreshed = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [existing.id]);
@@ -537,11 +538,13 @@ app.post('/api/auth/register', async (req, res) => {
         console.error(`[auth-sync] profile ${existing.id} failed: ${err.message}`)
       );
 
+      const responseProfileName = profileName || existing.profile_name || null;
       return res.json({
         token: existing.public_id,
         profile: {
           id: existing.id,
           api_key_masked: `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`,
+          profile_name: responseProfileName,
           base_url: baseUrl,
           last_read_trade_id: Number(existing.last_read_trade_id || 0),
         },
@@ -552,9 +555,9 @@ app.post('/api/auth/register', async (req, res) => {
     const now = Date.now();
 
     const result = await db.run(
-      `INSERT INTO profiles (public_id, tg_user_id, api_key, api_secret, base_url, recv_window, last_sync_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
-      [publicId, tgUserId, apiKey, apiSecret, baseUrl, recvWindow, now]
+      `INSERT INTO profiles (public_id, tg_user_id, profile_name, api_key, api_secret, base_url, recv_window, last_sync_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+      [publicId, tgUserId, profileName || null, apiKey, apiSecret, baseUrl, recvWindow, now]
     );
     setAuthCookie(res, publicId);
     const createdProfile = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [result.lastID]);
@@ -567,6 +570,7 @@ app.post('/api/auth/register', async (req, res) => {
       profile: {
         id: result.lastID,
         api_key_masked: `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`,
+        profile_name: profileName || null,
         base_url: baseUrl,
         last_read_trade_id: 0,
       },
@@ -581,6 +585,7 @@ app.get('/api/auth/me', requireProfile, async (req, res) => {
   res.json({
     id: req.profile.id,
     api_key_masked: apiKey ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}` : '',
+    profile_name: req.profile.profile_name || null,
     base_url: req.profile.base_url,
     last_read_trade_id: Number(req.profile.last_read_trade_id || 0),
   });
@@ -606,6 +611,7 @@ app.post('/api/auth/telegram-login', async (req, res) => {
       profile: {
         id: profile.id,
         api_key_masked: apiKey ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}` : '',
+        profile_name: profile.profile_name || null,
         base_url: profile.base_url,
         last_read_trade_id: Number(profile.last_read_trade_id || 0),
       },
@@ -741,6 +747,21 @@ app.post('/api/trades/mark-read', requireProfile, async (req, res) => {
     const maxId = Number(maxRow?.max_id || 0);
     await db.run('UPDATE profiles SET last_read_trade_id = ? WHERE id = ?', [maxId, req.profile.id]);
     res.json({ ok: true, last_read_trade_id: maxId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/profile/name', requireProfile, async (req, res) => {
+  try {
+    const db = await getDb();
+    const profileName = String(req.body.profile_name || '').trim();
+    if (!profileName) {
+      return res.status(400).json({ error: 'profile_name is required' });
+    }
+    const safeName = profileName.slice(0, 40);
+    await db.run('UPDATE profiles SET profile_name = ? WHERE id = ?', [safeName, req.profile.id]);
+    res.json({ ok: true, profile_name: safeName });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

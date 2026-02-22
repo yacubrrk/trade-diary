@@ -13,10 +13,13 @@ const $appSections = document.getElementById('app-sections');
 const $spotView = document.getElementById('spot-view');
 const $p2pView = document.getElementById('p2p-view');
 const $profileView = document.getElementById('profile-view');
+const $profileName = document.getElementById('profile-name');
 const $profileInfo = document.getElementById('profile-info');
 const $changeKeysBtn = document.getElementById('change-keys-btn');
 const $profileSettingsBtn = document.getElementById('profile-settings-btn');
 const $profileSettingsPanel = document.getElementById('profile-settings-panel');
+const $profileNameInput = document.getElementById('profile-name-input');
+const $saveProfileNameBtn = document.getElementById('save-profile-name-btn');
 const $bottomNav = document.getElementById('bottom-nav');
 const $tabSpot = document.getElementById('tab-spot');
 const $tabP2P = document.getElementById('tab-p2p');
@@ -39,6 +42,7 @@ let authToken = localStorage.getItem(STORAGE_TOKEN_KEY) || '';
 let lastSeenTradeId = 0;
 let latestTradeId = 0;
 let autoRefreshTimer = null;
+let currentProfileName = '';
 
 const fmt = (n) => (n === null || n === undefined ? '-' : Number(n).toFixed(4));
 const fmtQty = (n) => (n === null || n === undefined ? '-' : Number(n).toFixed(8));
@@ -110,7 +114,10 @@ function setLoggedInView(profile) {
   $authCard.classList.add('hidden');
   $appSections.classList.remove('hidden');
   $bottomNav.classList.remove('hidden');
-  $profileInfo.textContent = `Аккаунт: ${profile.api_key_masked} (${profile.base_url})`;
+  currentProfileName = String(profile.profile_name || '').trim();
+  $profileName.textContent = currentProfileName || 'Профиль без имени';
+  $profileInfo.textContent = `Биржа: Bybit (${profile.base_url})`;
+  $profileNameInput.value = currentProfileName;
   $profileSettingsPanel.classList.add('hidden');
   lastSeenTradeId = Number(profile.last_read_trade_id || 0);
   setActiveTab('spot');
@@ -423,6 +430,29 @@ $changeKeysBtn.addEventListener('click', () => {
 
 $profileSettingsBtn.addEventListener('click', () => {
   $profileSettingsPanel.classList.toggle('hidden');
+});
+
+$saveProfileNameBtn.addEventListener('click', async () => {
+  const name = String($profileNameInput.value || '').trim();
+  if (!name) {
+    alert('Введите имя профиля');
+    return;
+  }
+  try {
+    $saveProfileNameBtn.disabled = true;
+    $saveProfileNameBtn.classList.add('is-loading');
+    const result = await api('/api/profile/name', {
+      method: 'POST',
+      body: JSON.stringify({ profile_name: name }),
+    });
+    currentProfileName = String(result.profile_name || name);
+    $profileName.textContent = currentProfileName;
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    $saveProfileNameBtn.disabled = false;
+    $saveProfileNameBtn.classList.remove('is-loading');
+  }
 });
 
 function openTradeModal(t) {

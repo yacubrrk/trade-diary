@@ -293,9 +293,16 @@ button.is-loading::after {
 }
 
 .profile-info-text {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
+  color: var(--muted);
+}
+
+.profile-name-text {
+  font-size: 26px;
+  font-weight: 800;
+  margin-bottom: 2px;
 }
 
 #profile-info {
@@ -364,6 +371,18 @@ button.is-loading::after {
 
 .profile-settings-actions {
   margin-top: 8px;
+}
+
+.settings-label {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.profile-settings-actions input {
+  width: 100%;
+  margin-bottom: 8px;
 }
 
 .hint {

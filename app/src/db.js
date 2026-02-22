@@ -20,6 +20,7 @@ async function getDb() {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         public_id TEXT NOT NULL UNIQUE,
         tg_user_id TEXT,
+        profile_name TEXT,
         api_key TEXT NOT NULL UNIQUE,
         api_secret TEXT NOT NULL,
         base_url TEXT NOT NULL,
@@ -81,6 +82,11 @@ async function getDb() {
     if (!hasTgUserId) {
       await db.exec(`ALTER TABLE profiles ADD COLUMN tg_user_id TEXT`);
       await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_tg_user_id ON profiles(tg_user_id)`);
+    }
+
+    const hasProfileName = profileColumns.some((c) => c.name === 'profile_name');
+    if (!hasProfileName) {
+      await db.exec(`ALTER TABLE profiles ADD COLUMN profile_name TEXT`);
     }
   }
 
