@@ -413,9 +413,10 @@ app.post('/api/bybit/sync', async (req, res) => {
       limit: 200,
     });
 
-    const sorted = executions
-      .filter((item) => String(item.category || '').toLowerCase() === 'spot')
-      .sort((a, b) => toNum(a.execTime) - toNum(b.execTime));
+    // Bybit already scopes this endpoint by `category=spot` in request params.
+    // Some responses do not include `category` per row, so filtering by row field
+    // can incorrectly drop all executions.
+    const sorted = executions.sort((a, b) => toNum(a.execTime) - toNum(b.execTime));
 
     let createdBuys = 0;
     let closedFromSells = 0;
