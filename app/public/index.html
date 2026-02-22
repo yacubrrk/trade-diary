@@ -11,7 +11,7 @@
     <main class="container app-shell">
       <section class="hero">
         <h1 class="app-title">Trade Diary</h1>
-        <p class="app-subtitle">Bybit Spot Journal</p>
+        <p class="app-subtitle">Bybit Journal</p>
       </section>
 
       <section class="card auth-card" id="auth-card">
@@ -94,7 +94,12 @@
             <p class="hint">История сохраняется на сервере. Авто-синхронизация работает по расписанию.</p>
             <div id="profile-settings-panel" class="profile-settings-panel hidden">
               <h3>Настройки профиля</h3>
-              <p class="hint">Управление доступом и ключами API.</p>
+              <p class="hint">Управление профилями (до 2), доступом и ключами API.</p>
+              <label class="settings-label" for="profile-switch-select">Активный профиль</label>
+              <div class="profile-settings-actions">
+                <select id="profile-switch-select"></select>
+                <button id="switch-profile-btn" type="button">Переключить профиль</button>
+              </div>
               <label class="settings-label" for="profile-name-input">Имя профиля</label>
               <div class="profile-settings-actions">
                 <input id="profile-name-input" type="text" maxlength="40" placeholder="Например: Yakub Main" />

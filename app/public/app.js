@@ -18,6 +18,8 @@ const $profileInfo = document.getElementById('profile-info');
 const $changeKeysBtn = document.getElementById('change-keys-btn');
 const $profileSettingsBtn = document.getElementById('profile-settings-btn');
 const $profileSettingsPanel = document.getElementById('profile-settings-panel');
+const $profileSwitchSelect = document.getElementById('profile-switch-select');
+const $switchProfileBtn = document.getElementById('switch-profile-btn');
 const $profileNameInput = document.getElementById('profile-name-input');
 const $saveProfileNameBtn = document.getElementById('save-profile-name-btn');
 const $bottomNav = document.getElementById('bottom-nav');
@@ -43,6 +45,7 @@ let lastSeenTradeId = 0;
 let latestTradeId = 0;
 let autoRefreshTimer = null;
 let currentProfileName = '';
+let currentProfileId = 0;
 
 const fmt = (n) => (n === null || n === undefined ? '-' : Number(n).toFixed(4));
 const fmtQty = (n) => (n === null || n === undefined ? '-' : Number(n).toFixed(8));
@@ -99,6 +102,7 @@ function setLoggedOutView() {
   $tbody.innerHTML = '';
   $mobileTrades.innerHTML = '';
   $stats.innerHTML = '';
+  if ($profileSwitchSelect) $profileSwitchSelect.innerHTML = '';
 }
 
 function setActiveTab(tab) {
@@ -114,6 +118,7 @@ function setLoggedInView(profile) {
   $authCard.classList.add('hidden');
   $appSections.classList.remove('hidden');
   $bottomNav.classList.remove('hidden');
+  currentProfileId = Number(profile.id || 0);
   currentProfileName = String(profile.profile_name || '').trim();
   $profileName.textContent = currentProfileName || 'Профиль без имени';
   $profileInfo.textContent = `Биржа: Bybit (${profile.base_url})`;
@@ -122,6 +127,26 @@ function setLoggedInView(profile) {
   lastSeenTradeId = Number(profile.last_read_trade_id || 0);
   setActiveTab('spot');
   startAutoRefreshLoop();
+}
+
+async function loadProfileSwitchOptions() {
+  try {
+    const data = await api('/api/profiles');
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    if (!$profileSwitchSelect) return;
+    $profileSwitchSelect.innerHTML = rows
+      .map((p) => {
+        const title = p.profile_name || p.api_key_masked || `Профиль #${p.id}`;
+        const selected = Number(p.id) === Number(currentProfileId) ? 'selected' : '';
+        return `<option value="${p.id}" ${selected}>${title}</option>`;
+      })
+      .join('');
+    $switchProfileBtn.disabled = rows.length <= 1;
+  } catch (_err) {
+    if ($profileSwitchSelect) {
+      $profileSwitchSelect.innerHTML = '<option value="">Профили недоступны</option>';
+    }
+  }
 }
 
 async function api(path, options = {}) {
@@ -430,6 +455,32 @@ $changeKeysBtn.addEventListener('click', () => {
 
 $profileSettingsBtn.addEventListener('click', () => {
   $profileSettingsPanel.classList.toggle('hidden');
+  if (!$profileSettingsPanel.classList.contains('hidden')) {
+    loadProfileSwitchOptions().catch(() => {});
+  }
+});
+
+$switchProfileBtn.addEventListener('click', async () => {
+  const targetId = Number($profileSwitchSelect.value || 0);
+  if (!targetId || targetId === Number(currentProfileId || 0)) return;
+  try {
+    $switchProfileBtn.disabled = true;
+    $switchProfileBtn.classList.add('is-loading');
+    const result = await api('/api/profiles/switch', {
+      method: 'POST',
+      body: JSON.stringify({ profile_id: targetId }),
+    });
+    authToken = result.token;
+    localStorage.setItem(STORAGE_TOKEN_KEY, authToken);
+    setLoggedInView(result.profile);
+    await autoSyncAndRefresh();
+    await loadProfileSwitchOptions();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    $switchProfileBtn.disabled = false;
+    $switchProfileBtn.classList.remove('is-loading');
+  }
 });
 
 $saveProfileNameBtn.addEventListener('click', async () => {
@@ -447,6 +498,7 @@ $saveProfileNameBtn.addEventListener('click', async () => {
     });
     currentProfileName = String(result.profile_name || name);
     $profileName.textContent = currentProfileName;
+    await loadProfileSwitchOptions();
   } catch (err) {
     alert(err.message);
   } finally {

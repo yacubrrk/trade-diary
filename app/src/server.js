@@ -88,6 +88,17 @@ function clearAuthCookie(res) {
   });
 }
 
+function mapProfileResponse(profile) {
+  const apiKey = String(profile.api_key || '');
+  return {
+    id: profile.id,
+    api_key_masked: apiKey ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}` : '',
+    profile_name: profile.profile_name || null,
+    base_url: profile.base_url,
+    last_read_trade_id: Number(profile.last_read_trade_id || 0),
+  };
+}
+
 async function requireProfile(req, res, next) {
   try {
     const token = extractBearerToken(req);
@@ -518,6 +529,7 @@ app.post('/api/auth/register', async (req, res) => {
     const baseUrl = String(req.body.base_url || 'https://api.bybit.com').trim();
     const recvWindow = Math.max(1000, Math.min(15000, Number(req.body.recv_window || 5000)));
     const tgUserId = String(req.body.tg_user_id || '').trim() || null;
+    const now = Date.now();
 
     if (!apiKey || !apiSecret) {
       return res.status(400).json({ error: 'api_key and api_secret are required' });
@@ -528,9 +540,9 @@ app.post('/api/auth/register', async (req, res) => {
     if (existing) {
       await db.run(
         `UPDATE profiles
-         SET api_secret = ?, base_url = ?, recv_window = ?, tg_user_id = COALESCE(?, tg_user_id), profile_name = COALESCE(NULLIF(?, ''), profile_name)
+         SET api_secret = ?, base_url = ?, recv_window = ?, tg_user_id = COALESCE(?, tg_user_id), profile_name = COALESCE(NULLIF(?, ''), profile_name), last_selected_at = ?
          WHERE id = ?`,
-        [apiSecret, baseUrl, recvWindow, tgUserId, profileName, existing.id]
+        [apiSecret, baseUrl, recvWindow, tgUserId, profileName, now, existing.id]
       );
       setAuthCookie(res, existing.public_id);
       const refreshed = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [existing.id]);
@@ -542,22 +554,25 @@ app.post('/api/auth/register', async (req, res) => {
       return res.json({
         token: existing.public_id,
         profile: {
-          id: existing.id,
-          api_key_masked: `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`,
+          ...mapProfileResponse(refreshed),
           profile_name: responseProfileName,
-          base_url: baseUrl,
-          last_read_trade_id: Number(existing.last_read_trade_id || 0),
         },
       });
     }
 
     const publicId = makePublicId();
-    const now = Date.now();
+    if (tgUserId) {
+      const countRow = await db.get('SELECT COUNT(*) as cnt FROM profiles WHERE tg_user_id = ?', [tgUserId]);
+      const linkedCount = Number(countRow?.cnt || 0);
+      if (linkedCount >= 2) {
+        return res.status(400).json({ error: 'Можно привязать максимум 2 профиля' });
+      }
+    }
 
     const result = await db.run(
-      `INSERT INTO profiles (public_id, tg_user_id, profile_name, api_key, api_secret, base_url, recv_window, last_sync_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-      [publicId, tgUserId, profileName || null, apiKey, apiSecret, baseUrl, recvWindow, now]
+      `INSERT INTO profiles (public_id, tg_user_id, profile_name, api_key, api_secret, base_url, recv_window, last_selected_at, last_sync_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+      [publicId, tgUserId, profileName || null, apiKey, apiSecret, baseUrl, recvWindow, now, now]
     );
     setAuthCookie(res, publicId);
     const createdProfile = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [result.lastID]);
@@ -567,13 +582,7 @@ app.post('/api/auth/register', async (req, res) => {
 
     res.status(201).json({
       token: publicId,
-      profile: {
-        id: result.lastID,
-        api_key_masked: `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`,
-        profile_name: profileName || null,
-        base_url: baseUrl,
-        last_read_trade_id: 0,
-      },
+      profile: mapProfileResponse(createdProfile),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -581,14 +590,7 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 app.get('/api/auth/me', requireProfile, async (req, res) => {
-  const apiKey = String(req.profile.api_key || '');
-  res.json({
-    id: req.profile.id,
-    api_key_masked: apiKey ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}` : '',
-    profile_name: req.profile.profile_name || null,
-    base_url: req.profile.base_url,
-    last_read_trade_id: Number(req.profile.last_read_trade_id || 0),
-  });
+  res.json(mapProfileResponse(req.profile));
 });
 
 app.post('/api/auth/telegram-login', async (req, res) => {
@@ -599,25 +601,75 @@ app.post('/api/auth/telegram-login', async (req, res) => {
       return res.status(400).json({ error: 'tg_user_id is required' });
     }
 
-    const profile = await db.get('SELECT * FROM profiles WHERE tg_user_id = ? LIMIT 1', [tgUserId]);
+    const profile = await db.get(
+      `SELECT *
+       FROM profiles
+       WHERE tg_user_id = ?
+       ORDER BY last_selected_at DESC, created_at DESC, id DESC
+       LIMIT 1`,
+      [tgUserId]
+    );
     if (!profile) {
       return res.status(404).json({ error: 'Profile not found for Telegram user' });
     }
 
     setAuthCookie(res, profile.public_id);
-    const apiKey = String(profile.api_key || '');
+    await db.run('UPDATE profiles SET last_selected_at = ? WHERE id = ?', [Date.now(), profile.id]);
+    const refreshed = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [profile.id]);
     return res.json({
-      token: profile.public_id,
-      profile: {
-        id: profile.id,
-        api_key_masked: apiKey ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}` : '',
-        profile_name: profile.profile_name || null,
-        base_url: profile.base_url,
-        last_read_trade_id: Number(profile.last_read_trade_id || 0),
-      },
+      token: refreshed.public_id,
+      profile: mapProfileResponse(refreshed),
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/profiles', requireProfile, async (req, res) => {
+  try {
+    const db = await getDb();
+    const tgUserId = String(req.profile.tg_user_id || '').trim();
+    if (!tgUserId) {
+      return res.json({ rows: [mapProfileResponse(req.profile)] });
+    }
+    const rows = await db.all(
+      'SELECT * FROM profiles WHERE tg_user_id = ? ORDER BY last_selected_at DESC, created_at DESC, id DESC',
+      [tgUserId]
+    );
+    res.json({ rows: rows.map(mapProfileResponse) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/profiles/switch', requireProfile, async (req, res) => {
+  try {
+    const db = await getDb();
+    const targetId = Number(req.body.profile_id);
+    if (!Number.isFinite(targetId) || targetId <= 0) {
+      return res.status(400).json({ error: 'profile_id is required' });
+    }
+
+    const target = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [targetId]);
+    if (!target) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+
+    const currentTg = String(req.profile.tg_user_id || '').trim();
+    const targetTg = String(target.tg_user_id || '').trim();
+    if (currentTg && targetTg && currentTg !== targetTg) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    await db.run('UPDATE profiles SET last_selected_at = ? WHERE id = ?', [Date.now(), target.id]);
+    const refreshed = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [target.id]);
+    setAuthCookie(res, refreshed.public_id);
+    res.json({
+      token: refreshed.public_id,
+      profile: mapProfileResponse(refreshed),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

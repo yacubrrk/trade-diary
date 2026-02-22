@@ -385,6 +385,11 @@ button.is-loading::after {
   margin-bottom: 8px;
 }
 
+.profile-settings-actions select {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
 .hint {
   margin: 8px 0 0;
   font-size: 12px;
