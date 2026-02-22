@@ -14,27 +14,30 @@
         <p class="app-subtitle">Bybit Spot Journal</p>
       </section>
 
-      <section class="card" id="auth-card">
-        <h2>Регистрация по ключам Bybit</h2>
-        <form id="auth-form" class="grid-form">
-          <label>
-            API Key
-            <input type="text" name="api_key" required />
-          </label>
-          <label>
-            API Secret
-            <input type="password" name="api_secret" required />
-          </label>
-          <label>
-            Bybit URL
-            <select name="base_url">
-              <option value="https://api.bybit.com">Mainnet (реальный)</option>
-              <option value="https://api-testnet.bybit.com">Testnet</option>
-            </select>
-          </label>
-          <button type="submit">Сохранить и войти</button>
+      <section class="card auth-card" id="auth-card">
+        <h2 class="auth-title">Подключение аккаунта Bybit</h2>
+        <form id="auth-form" class="auth-form">
+          <label class="auth-label" for="api-key-input">Ключ API</label>
+          <input id="api-key-input" type="text" name="api_key" placeholder="Вставьте API Key" required />
+
+          <label class="auth-label" for="api-secret-input">Секретный ключ</label>
+          <input
+            id="api-secret-input"
+            type="password"
+            name="api_secret"
+            placeholder="Вставьте API Secret"
+            required
+          />
+
+          <label class="auth-label" for="base-url-select">Среда</label>
+          <select id="base-url-select" name="base_url">
+            <option value="https://api.bybit.com">Mainnet (реальный аккаунт)</option>
+            <option value="https://api-testnet.bybit.com">Testnet (тестовый)</option>
+          </select>
+
+          <button class="auth-submit" type="submit">Войти и синхронизировать</button>
         </form>
-        <p class="hint">Каждый пользователь вводит свои ключи. Данные аккаунтов разделены.</p>
+        <p class="hint auth-hint">Ключи используются только для чтения истории сделок.</p>
       </section>
 
       <section class="card profile-row hidden" id="profile-card">
