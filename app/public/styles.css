@@ -166,10 +166,18 @@ h2 {
 }
 
 .stat-item .value {
-  font-size: 32px;
+  font-size: 21px;
   font-weight: 800;
   line-height: 1.05;
   letter-spacing: -0.03em;
+}
+
+.stat-item.stat-pos .value {
+  color: var(--good);
+}
+
+.stat-item.stat-neg .value {
+  color: var(--bad);
 }
 
 .grid-form {
@@ -313,7 +321,7 @@ small {
   }
 
   .stat-item .value {
-    font-size: 26px;
+    font-size: 18px;
   }
 
   .profile-row,

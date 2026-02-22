@@ -33,6 +33,11 @@ function fmtDuration(trade) {
     if (totalSec < 60) return `${totalSec} сек`;
     const totalMin = Math.floor(totalSec / 60);
     if (totalMin < 60) return `${totalMin} мин`;
+    const totalHours = Math.floor(totalMin / 60);
+    if (totalHours >= 24) {
+      const days = Math.floor(totalHours / 24);
+      return `${days} д`;
+    }
     const hours = Math.floor(totalMin / 60);
     const mins = totalMin % 60;
     return mins > 0 ? `${hours} ч ${mins} мин` : `${hours} ч`;
@@ -83,9 +88,9 @@ async function loadStats() {
     ['Всего сделок', stats.total_trades],
     ['Открытых', stats.open_trades],
     ['Закрытых', stats.closed_trades],
-    ['Общий P/L USDT', fmt(stats.total_pl_usdt)],
-    ['Средний P/L USDT', fmt(stats.avg_pl_usdt)],
-    ['Средний P/L %', fmt(stats.avg_pl_percent)],
+    ['Общий P/L USDT', fmt(stats.total_pl_usdt), Number(stats.total_pl_usdt)],
+    ['Средний P/L USDT', fmt(stats.avg_pl_usdt), Number(stats.avg_pl_usdt)],
+    ['Средний P/L %', fmt(stats.avg_pl_percent), Number(stats.avg_pl_percent)],
     ['Средний профит', fmt(stats.avg_win_usdt)],
     ['Средний лосс', fmt(stats.avg_loss_usdt)],
     ['Win rate %', fmt(stats.win_rate_percent)],
@@ -94,8 +99,8 @@ async function loadStats() {
 
   $stats.innerHTML = items
     .map(
-      ([label, value]) => `
-      <div class="stat-item">
+      ([label, value, score]) => `
+      <div class="stat-item ${Number.isFinite(score) ? (score > 0 ? 'stat-pos' : score < 0 ? 'stat-neg' : '') : ''}">
         <div class="label">${label}</div>
         <div class="value">${value}</div>
       </div>`
