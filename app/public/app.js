@@ -26,6 +26,8 @@ const $stats = document.getElementById('stats');
 const $tbody = document.getElementById('trades-body');
 const $mobileTrades = document.getElementById('mobile-trades');
 const $p2pList = document.getElementById('p2p-list');
+const $profileBalanceSummary = document.getElementById('profile-balance-summary');
+const $profileBalanceList = document.getElementById('profile-balance-list');
 const $tradeModal = document.getElementById('trade-modal');
 const $tradeModalTitle = document.getElementById('trade-modal-title');
 const $tradeModalGrid = document.getElementById('trade-modal-grid');
@@ -263,7 +265,7 @@ async function loadTrades() {
 }
 
 async function refreshAll() {
-  await Promise.all([loadStats(), loadTrades(), loadP2POrders()]);
+  await Promise.all([loadStats(), loadTrades(), loadP2POrders(), loadProfileBalance()]);
 }
 
 function setNewTradesIndicator(count) {
@@ -309,6 +311,30 @@ async function loadP2POrders() {
       .join('');
   } catch (err) {
     $p2pList.innerHTML = `<div class="hint">${err.message}</div>`;
+  }
+}
+
+async function loadProfileBalance() {
+  try {
+    const data = await api('/api/balance');
+    const total = Number(data.unified_total_usd || 0).toFixed(2);
+    $profileBalanceSummary.textContent = total;
+
+    const coins = (data.unified_coins || []).slice(0, 6).map(
+      (c) => `
+        <div class="profile-balance-item">
+          <span>${c.coin}</span>
+          <strong>$${Number(c.usd_value || 0).toFixed(2)}</strong>
+        </div>
+      `
+    );
+
+    $profileBalanceList.innerHTML = coins.length
+      ? coins.join('')
+      : '<div class="hint">Ненулевых активов не найдено</div>';
+  } catch (err) {
+    $profileBalanceSummary.textContent = '-';
+    $profileBalanceList.innerHTML = `<div class="hint">${err.message}</div>`;
   }
 }
 

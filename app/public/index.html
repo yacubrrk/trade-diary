@@ -85,11 +85,18 @@
               </button>
             </div>
             <div id="profile-info" class="profile-info-text"></div>
+            <div class="profile-balance-card">
+              <div class="profile-balance-title">Баланс (USD)</div>
+              <div id="profile-balance-summary" class="profile-balance-summary">Загрузка...</div>
+              <div id="profile-balance-list" class="profile-balance-list"></div>
+            </div>
             <p class="hint">История сохраняется на сервере. Авто-синхронизация работает по расписанию.</p>
-            <button id="change-keys-btn">Сменить ключи</button>
             <div id="profile-settings-panel" class="profile-settings-panel hidden">
               <h3>Настройки профиля</h3>
-              <p class="hint">Скоро добавим: баланс, предпочтения и персональные параметры отображения.</p>
+              <p class="hint">Управление доступом и ключами API.</p>
+              <div class="profile-settings-actions">
+                <button id="change-keys-btn" type="button">Сменить ключи</button>
+              </div>
             </div>
           </section>
         </div>
