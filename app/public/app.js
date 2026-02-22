@@ -23,6 +23,24 @@ let authToken = localStorage.getItem(STORAGE_TOKEN_KEY) || '';
 const fmt = (n) => (n === null || n === undefined ? '-' : Number(n).toFixed(4));
 const fmtQty = (n) => (n === null || n === undefined ? '-' : Number(n).toFixed(8));
 const fmtTime = (ms) => (ms ? new Date(Number(ms)).toLocaleString() : '-');
+function fmtDuration(trade) {
+  if (trade.status === 'OPEN') return 'Открыта';
+
+  const entry = Number(trade.entry_time || 0);
+  const exit = Number(trade.exit_time || 0);
+  if (entry > 0 && exit > entry) {
+    const totalSec = Math.max(1, Math.round((exit - entry) / 1000));
+    if (totalSec < 60) return `${totalSec} сек`;
+    const totalMin = Math.floor(totalSec / 60);
+    if (totalMin < 60) return `${totalMin} мин`;
+    const hours = Math.floor(totalMin / 60);
+    const mins = totalMin % 60;
+    return mins > 0 ? `${hours} ч ${mins} мин` : `${hours} ч`;
+  }
+
+  if (trade.duration_minutes === null || trade.duration_minutes === undefined) return '-';
+  return `${trade.duration_minutes} мин`;
+}
 
 function setLoggedOutView() {
   $authCard.classList.remove('hidden');
@@ -109,7 +127,7 @@ async function loadTrades() {
           <td>${fmt(t.commission_usdt)}</td>
           <td class="${plClass}">${fmt(t.pl_usdt)}</td>
           <td class="${plClass}">${fmt(t.pl_percent)}</td>
-          <td>${t.duration_minutes ?? '-'}</td>
+          <td>${fmtDuration(t)}</td>
           <td>${t.source}</td>
           <td>${closeButton(t)}</td>
         </tr>
