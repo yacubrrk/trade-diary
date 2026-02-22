@@ -151,7 +151,6 @@ $authForm.addEventListener('submit', async (e) => {
     const payload = {
       api_key: $authForm.elements.api_key.value.trim(),
       api_secret: $authForm.elements.api_secret.value.trim(),
-      base_url: $authForm.elements.base_url.value,
     };
 
     const result = await api('/api/auth/register', {

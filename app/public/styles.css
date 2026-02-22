@@ -84,20 +84,19 @@ h2 {
 }
 
 .auth-card {
-  padding: 18px;
-  border-radius: 22px;
-  background:
-    radial-gradient(120% 160% at 0% 0%, rgba(35, 91, 134, 0.35), transparent 52%),
-    linear-gradient(140deg, #081f2f 0%, #0a2a3f 100%);
-  border: 1px solid rgba(170, 212, 255, 0.22);
-  color: #dbe9f7;
+  max-width: 520px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--card-strong);
+  border: 1px solid var(--line);
+  color: var(--text);
 }
 
 .auth-title {
-  margin: 0 0 14px;
-  color: #ecf6ff;
-  font-family: 'Space Grotesk', 'Manrope', sans-serif;
-  font-size: clamp(1.4rem, 2vw, 1.8rem);
+  margin: 0 0 10px;
+  color: var(--text);
+  font-family: 'Manrope', 'Segoe UI', sans-serif;
+  font-size: 1.2rem;
 }
 
 .auth-form {
@@ -107,45 +106,41 @@ h2 {
 
 .auth-form input,
 .auth-form select {
-  height: 58px;
-  border-radius: 22px;
-  border: 2px solid rgba(196, 224, 255, 0.4);
-  background: rgba(8, 28, 43, 0.6);
-  color: #ecf6ff;
-  font-size: 22px;
-  padding: 0 18px;
-}
-
-.auth-form input::placeholder {
-  color: rgba(206, 224, 241, 0.75);
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  font-size: 14px;
+  padding: 0 12px;
 }
 
 .auth-form input:focus,
 .auth-form select:focus {
-  border-color: #cfe8ff;
-  box-shadow: 0 0 0 4px rgba(130, 191, 255, 0.2);
+  border-color: rgba(31, 138, 90, 0.48);
+  box-shadow: 0 0 0 4px rgba(31, 138, 90, 0.12);
 }
 
 .auth-label {
-  margin-top: 2px;
-  color: rgba(217, 234, 250, 0.9);
+  margin-top: 0;
+  color: var(--muted);
   font-size: 13px;
 }
 
 .auth-submit {
-  margin-top: 8px;
-  height: 58px;
-  border-radius: 999px;
+  margin-top: 6px;
+  height: 42px;
+  border-radius: 10px;
   width: 100%;
-  font-size: 34px;
-  line-height: 1;
-  letter-spacing: -0.02em;
-  background: linear-gradient(135deg, #204f90 0%, #1a3f77 100%);
+  font-size: 14px;
+  line-height: 1.1;
+  letter-spacing: 0;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
 }
 
 .auth-hint {
-  margin-top: 10px;
-  color: rgba(187, 214, 239, 0.84);
+  margin-top: 8px;
+  color: var(--muted);
 }
 
 #profile-card {
@@ -329,13 +324,13 @@ small {
 
   .auth-form input,
   .auth-form select {
-    font-size: 18px;
-    height: 52px;
+    font-size: 14px;
+    height: 42px;
   }
 
   .auth-submit {
-    font-size: 27px;
-    height: 52px;
+    font-size: 14px;
+    height: 42px;
   }
 
   button {
