@@ -34,51 +34,66 @@
         <p class="hint auth-hint">Ключи используются только для чтения истории сделок.</p>
       </section>
 
-      <section class="card profile-row hidden" id="profile-card">
-        <div id="profile-info"></div>
-        <button id="change-keys-btn">Сменить ключи</button>
-      </section>
-
       <div id="app-sections" class="hidden">
-        <section class="card stats-grid" id="stats"></section>
+        <div id="history-view">
+          <section class="card stats-grid" id="stats"></section>
 
-        <section class="card">
-          <h2>Синхронизация с Bybit</h2>
-          <div class="sync-row">
-            <label>
-              За сколько дней подтянуть сделки
-              <input type="number" id="sync-days" value="7" min="1" max="30" />
-            </label>
-            <button id="sync-btn">Синхронизировать</button>
-          </div>
-        </section>
+          <section class="card">
+            <h2>Синхронизация с Bybit</h2>
+            <div class="sync-row">
+              <label>
+                За сколько дней подтянуть сделки
+                <input type="number" id="sync-days" value="7" min="1" max="30" />
+              </label>
+              <button id="sync-btn">Синхронизировать</button>
+            </div>
+          </section>
 
-        <section class="card">
-          <h2>Таблица сделок</h2>
-          <div class="mobile-trades hidden" id="mobile-trades"></div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Токен</th>
-                  <th>Статус</th>
-                  <th>Кол-во</th>
-                  <th>Вход</th>
-                  <th>Выход</th>
-                  <th>Сумма входа</th>
-                  <th>Сумма выхода</th>
-                  <th>Комиссия</th>
-                  <th>P/L USDT</th>
-                  <th>P/L %</th>
-                  <th>Длительность</th>
-                  <th>Источник</th>
-                </tr>
-              </thead>
-              <tbody id="trades-body"></tbody>
-            </table>
-          </div>
-        </section>
+          <section class="card">
+            <h2>Таблица сделок</h2>
+            <div class="mobile-trades hidden" id="mobile-trades"></div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Токен</th>
+                    <th>Статус</th>
+                    <th>Кол-во</th>
+                    <th>Вход</th>
+                    <th>Выход</th>
+                    <th>Сумма входа</th>
+                    <th>Сумма выхода</th>
+                    <th>Комиссия</th>
+                    <th>P/L USDT</th>
+                    <th>P/L %</th>
+                    <th>Длительность</th>
+                    <th>Источник</th>
+                  </tr>
+                </thead>
+                <tbody id="trades-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <div id="profile-view" class="hidden">
+          <section class="card profile-panel">
+            <div class="profile-head">
+              <h2>Профиль</h2>
+              <button id="profile-settings-btn" class="profile-settings-btn" type="button" aria-label="Настройки">
+                &#9881;
+              </button>
+            </div>
+            <div id="profile-info" class="profile-info-text"></div>
+            <p class="hint">История сохраняется на сервере. Авто-синхронизация работает по расписанию.</p>
+            <button id="change-keys-btn">Сменить ключи</button>
+            <div id="profile-settings-panel" class="profile-settings-panel hidden">
+              <h3>Настройки профиля</h3>
+              <p class="hint">Скоро добавим: баланс, предпочтения и персональные параметры отображения.</p>
+            </div>
+          </section>
+        </div>
       </div>
     </main>
 
@@ -91,6 +106,11 @@
         <div class="trade-modal-grid" id="trade-modal-grid"></div>
       </div>
     </div>
+
+    <nav class="bottom-nav hidden" id="bottom-nav">
+      <button class="nav-btn active" id="tab-history" type="button">История</button>
+      <button class="nav-btn" id="tab-profile" type="button">Профиль</button>
+    </nav>
 
     <script src="/app.js"></script>
   </body>

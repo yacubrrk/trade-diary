@@ -23,6 +23,9 @@ const toNum = (v, d = 0) => {
 const roundMoney = (n) => Math.round((n + Number.EPSILON) * 1000000) / 1000000;
 const roundQty = (n) => Math.round((n + Number.EPSILON) * 1000000000000) / 1000000000000;
 const DUST_QTY = 0.000001;
+const AUTO_SYNC_ENABLED = String(process.env.AUTO_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
+const AUTO_SYNC_INTERVAL_MINUTES = Math.max(5, Number(process.env.AUTO_SYNC_INTERVAL_MINUTES || 30));
+const AUTO_SYNC_DAYS = Math.max(1, Math.min(7, Number(process.env.AUTO_SYNC_DAYS || 2)));
 
 function buildClosedMetrics({ qty, entryPrice, exitPrice, entryCommission, exitCommission, entryTime, exitTime }) {
   const invested = qty * entryPrice;
@@ -311,6 +314,120 @@ async function closeDustOpenTrades(db, profileId) {
   return Number(result.changes || 0);
 }
 
+async function syncBybitForProfile(db, profile, days) {
+  const apiKey = profile.api_key;
+  const apiSecret = profile.api_secret;
+  const recvWindow = Number(profile.recv_window || 5000);
+  const baseUrl = profile.base_url || 'https://api.bybit.com';
+
+  const safeDays = Math.max(1, Math.min(30, Number(days || 7)));
+  const endTime = Date.now();
+  const startTime = endTime - safeDays * 24 * 60 * 60 * 1000;
+
+  const executions = await fetchBybitExecutions({
+    apiKey,
+    apiSecret,
+    baseUrl,
+    recvWindow,
+    startTime,
+    endTime,
+    limit: 200,
+  });
+
+  const sorted = executions.sort((a, b) => toNum(a.execTime) - toNum(b.execTime));
+
+  let createdBuys = 0;
+  let closedFromSells = 0;
+  let unmatchedSellQty = 0;
+
+  for (const ex of sorted) {
+    const side = String(ex.side || '').toUpperCase();
+    const symbol = String(ex.symbol || '').toUpperCase();
+    const qty = toNum(ex.execQty);
+    const price = toNum(ex.execPrice);
+    const fee = Math.abs(toNum(ex.execFee));
+    const execId = String(ex.execId || '');
+    const execTime = toNum(ex.execTime);
+
+    if (!symbol || qty <= 0 || price <= 0 || !execTime) continue;
+
+    if (side === 'BUY') {
+      if (execId) {
+        const exists = await db.get(
+          'SELECT id FROM trades WHERE owner_profile_id = ? AND buy_exec_id = ? LIMIT 1',
+          [profile.id, execId]
+        );
+        if (exists) continue;
+      }
+
+      await db.run(
+        `INSERT INTO trades (
+          owner_profile_id,
+          symbol, entry_time, exit_time,
+          qty, remaining_qty,
+          entry_price, exit_price,
+          invested_usdt, received_usdt,
+          commission_usdt,
+          pl_usdt, pl_percent,
+          duration_minutes,
+          status, source,
+          buy_exec_id, sell_exec_id,
+          created_at
+        ) VALUES (?, ?, ?, NULL, ?, ?, ?, NULL, ?, NULL, ?, NULL, NULL, NULL, 'OPEN', 'bybit', ?, NULL, ?)`,
+        [
+          profile.id,
+          symbol,
+          execTime,
+          qty,
+          qty,
+          price,
+          roundMoney(qty * price),
+          fee,
+          execId || null,
+          Date.now(),
+        ]
+      );
+      createdBuys += 1;
+    }
+
+    if (side === 'SELL') {
+      const result = await applySellExecutionFifo(db, profile.id, ex);
+      closedFromSells += result.closedCount;
+      unmatchedSellQty += toNum(result.unmatchedQty);
+    }
+  }
+
+  const dust_closed = await closeDustOpenTrades(db, profile.id);
+
+  return {
+    synced_days: safeDays,
+    executions_received: sorted.length,
+    buys_created: createdBuys,
+    sell_matches_closed: closedFromSells,
+    unmatched_sell_qty: roundQty(unmatchedSellQty),
+    dust_closed,
+  };
+}
+
+let autoSyncRunning = false;
+async function runAutoSync() {
+  if (autoSyncRunning) return;
+  autoSyncRunning = true;
+  try {
+    const db = await getDb();
+    const profiles = await db.all('SELECT * FROM profiles ORDER BY id ASC');
+    for (const profile of profiles) {
+      try {
+        await syncBybitForProfile(db, profile, AUTO_SYNC_DAYS);
+      } catch (err) {
+        console.error(`[auto-sync] profile ${profile.id} failed: ${err.message}`);
+      }
+    }
+  } finally {
+    autoSyncRunning = false;
+  }
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'trade-diary' });
 });
@@ -469,100 +586,9 @@ app.get('/api/stats', requireProfile, async (req, res) => {
 app.post('/api/bybit/sync', requireProfile, async (req, res) => {
   try {
     const db = await getDb();
-    const apiKey = req.profile.api_key;
-    const apiSecret = req.profile.api_secret;
-    const recvWindow = Number(req.profile.recv_window || 5000);
-    const baseUrl = req.profile.base_url || 'https://api.bybit.com';
-
     const days = Math.max(1, Math.min(30, Number(req.body.days || 7)));
-    const endTime = Date.now();
-    const startTime = endTime - days * 24 * 60 * 60 * 1000;
-
-    const executions = await fetchBybitExecutions({
-      apiKey,
-      apiSecret,
-      baseUrl,
-      recvWindow,
-      startTime,
-      endTime,
-      limit: 200,
-    });
-
-    const sorted = executions.sort((a, b) => toNum(a.execTime) - toNum(b.execTime));
-
-    let createdBuys = 0;
-    let closedFromSells = 0;
-    let unmatchedSellQty = 0;
-
-    for (const ex of sorted) {
-      const side = String(ex.side || '').toUpperCase();
-      const symbol = String(ex.symbol || '').toUpperCase();
-      const qty = toNum(ex.execQty);
-      const price = toNum(ex.execPrice);
-      const fee = Math.abs(toNum(ex.execFee));
-      const execId = String(ex.execId || '');
-      const execTime = toNum(ex.execTime);
-
-      if (!symbol || qty <= 0 || price <= 0 || !execTime) {
-        continue;
-      }
-
-      if (side === 'BUY') {
-        if (execId) {
-          const exists = await db.get(
-            'SELECT id FROM trades WHERE owner_profile_id = ? AND buy_exec_id = ? LIMIT 1',
-            [req.profile.id, execId]
-          );
-          if (exists) continue;
-        }
-
-        await db.run(
-          `INSERT INTO trades (
-            owner_profile_id,
-            symbol, entry_time, exit_time,
-            qty, remaining_qty,
-            entry_price, exit_price,
-            invested_usdt, received_usdt,
-            commission_usdt,
-            pl_usdt, pl_percent,
-            duration_minutes,
-            status, source,
-            buy_exec_id, sell_exec_id,
-            created_at
-          ) VALUES (?, ?, ?, NULL, ?, ?, ?, NULL, ?, NULL, ?, NULL, NULL, NULL, 'OPEN', 'bybit', ?, NULL, ?)`,
-          [
-            req.profile.id,
-            symbol,
-            execTime,
-            qty,
-            qty,
-            price,
-            roundMoney(qty * price),
-            fee,
-            execId || null,
-            Date.now(),
-          ]
-        );
-        createdBuys += 1;
-      }
-
-      if (side === 'SELL') {
-        const result = await applySellExecutionFifo(db, req.profile.id, ex);
-        closedFromSells += result.closedCount;
-        unmatchedSellQty += toNum(result.unmatchedQty);
-      }
-    }
-
-    const dust_closed = await closeDustOpenTrades(db, req.profile.id);
-
-    res.json({
-      synced_days: days,
-      executions_received: sorted.length,
-      buys_created: createdBuys,
-      sell_matches_closed: closedFromSells,
-      unmatched_sell_qty: roundQty(unmatchedSellQty),
-      dust_closed,
-    });
+    const result = await syncBybitForProfile(db, req.profile, days);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -570,4 +596,13 @@ app.post('/api/bybit/sync', requireProfile, async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server started: http://localhost:${PORT}`);
+  if (AUTO_SYNC_ENABLED) {
+    runAutoSync().catch((err) => console.error(`[auto-sync] initial failed: ${err.message}`));
+    setInterval(() => {
+      runAutoSync().catch((err) => console.error(`[auto-sync] loop failed: ${err.message}`));
+    }, AUTO_SYNC_INTERVAL_MINUTES * 60 * 1000);
+    console.log(`[auto-sync] enabled: every ${AUTO_SYNC_INTERVAL_MINUTES} min, days=${AUTO_SYNC_DAYS}`);
+  } else {
+    console.log('[auto-sync] disabled');
+  }
 });

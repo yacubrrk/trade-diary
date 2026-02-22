@@ -9,9 +9,15 @@ const STORAGE_TOKEN_KEY = 'trade_diary_token';
 const $authCard = document.getElementById('auth-card');
 const $authForm = document.getElementById('auth-form');
 const $appSections = document.getElementById('app-sections');
-const $profileCard = document.getElementById('profile-card');
+const $historyView = document.getElementById('history-view');
+const $profileView = document.getElementById('profile-view');
 const $profileInfo = document.getElementById('profile-info');
 const $changeKeysBtn = document.getElementById('change-keys-btn');
+const $profileSettingsBtn = document.getElementById('profile-settings-btn');
+const $profileSettingsPanel = document.getElementById('profile-settings-panel');
+const $bottomNav = document.getElementById('bottom-nav');
+const $tabHistory = document.getElementById('tab-history');
+const $tabProfile = document.getElementById('tab-profile');
 
 const $stats = document.getElementById('stats');
 const $tbody = document.getElementById('trades-body');
@@ -55,17 +61,28 @@ function fmtDuration(trade) {
 function setLoggedOutView() {
   $authCard.classList.remove('hidden');
   $appSections.classList.add('hidden');
-  $profileCard.classList.add('hidden');
+  $bottomNav.classList.add('hidden');
+  $profileSettingsPanel.classList.add('hidden');
   $tbody.innerHTML = '';
   $mobileTrades.innerHTML = '';
   $stats.innerHTML = '';
 }
 
+function setActiveTab(tab) {
+  const isHistory = tab === 'history';
+  $historyView.classList.toggle('hidden', !isHistory);
+  $profileView.classList.toggle('hidden', isHistory);
+  $tabHistory.classList.toggle('active', isHistory);
+  $tabProfile.classList.toggle('active', !isHistory);
+}
+
 function setLoggedInView(profile) {
   $authCard.classList.add('hidden');
   $appSections.classList.remove('hidden');
-  $profileCard.classList.remove('hidden');
+  $bottomNav.classList.remove('hidden');
   $profileInfo.textContent = `Аккаунт: ${profile.api_key_masked} (${profile.base_url})`;
+  $profileSettingsPanel.classList.add('hidden');
+  setActiveTab('history');
 }
 
 async function api(path, options = {}) {
@@ -229,6 +246,10 @@ $changeKeysBtn.addEventListener('click', () => {
   setLoggedOutView();
 });
 
+$profileSettingsBtn.addEventListener('click', () => {
+  $profileSettingsPanel.classList.toggle('hidden');
+});
+
 $syncBtn.addEventListener('click', async () => {
   try {
     $syncBtn.disabled = true;
@@ -285,6 +306,9 @@ $tradeModalClose.addEventListener('click', closeTradeModal);
 $tradeModal.addEventListener('click', (e) => {
   if (e.target === $tradeModal) closeTradeModal();
 });
+
+$tabHistory.addEventListener('click', () => setActiveTab('history'));
+$tabProfile.addEventListener('click', () => setActiveTab('profile'));
 
 async function bootstrap() {
   try {
