@@ -103,11 +103,6 @@ async function loadStats() {
     .join('');
 }
 
-function closeButton(trade) {
-  if (trade.status !== 'OPEN') return '-';
-  return `<button data-close-id="${trade.id}" class="small-btn">Закрыть</button>`;
-}
-
 async function loadTrades() {
   const trades = await api('/api/trades');
   $tbody.innerHTML = trades
@@ -129,7 +124,6 @@ async function loadTrades() {
           <td class="${plClass}">${fmt(t.pl_percent)}</td>
           <td>${fmtDuration(t)}</td>
           <td>${t.source}</td>
-          <td>${closeButton(t)}</td>
         </tr>
       `;
     })
@@ -169,30 +163,6 @@ $changeKeysBtn.addEventListener('click', () => {
   authToken = '';
   localStorage.removeItem(STORAGE_TOKEN_KEY);
   setLoggedOutView();
-});
-
-$tbody.addEventListener('click', async (e) => {
-  const btn = e.target.closest('button[data-close-id]');
-  if (!btn) return;
-
-  const tradeId = btn.getAttribute('data-close-id');
-  const exitPriceInput = prompt('Введите цену выхода:');
-  if (!exitPriceInput) return;
-
-  const feeInput = prompt('Введите комиссию выхода (USDT), если есть:', '0');
-
-  try {
-    await api(`/api/trades/${tradeId}/close`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        exit_price: Number(exitPriceInput),
-        exit_commission_usdt: Number(feeInput || 0),
-      }),
-    });
-    await refreshAll();
-  } catch (err) {
-    alert(err.message);
-  }
 });
 
 $syncBtn.addEventListener('click', async () => {
