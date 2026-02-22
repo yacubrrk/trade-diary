@@ -20,7 +20,9 @@ const toNum = (v, d = 0) => {
   return Number.isFinite(n) ? n : d;
 };
 
-const safeRound = (n) => Math.round((n + Number.EPSILON) * 1000000) / 1000000;
+const roundMoney = (n) => Math.round((n + Number.EPSILON) * 1000000) / 1000000;
+const roundQty = (n) => Math.round((n + Number.EPSILON) * 1000000000000) / 1000000000000;
+const DUST_QTY = 0.000001;
 
 function buildClosedMetrics({ qty, entryPrice, exitPrice, entryCommission, exitCommission, entryTime, exitTime }) {
   const invested = qty * entryPrice;
@@ -31,11 +33,11 @@ function buildClosedMetrics({ qty, entryPrice, exitPrice, entryCommission, exitC
   const durationMinutes = Math.max(0, Math.round((exitTime - entryTime) / 60000));
 
   return {
-    invested_usdt: safeRound(invested),
-    received_usdt: safeRound(received),
-    commission_usdt: safeRound(totalCommission),
-    pl_usdt: safeRound(pl),
-    pl_percent: safeRound(plPercent),
+    invested_usdt: roundMoney(invested),
+    received_usdt: roundMoney(received),
+    commission_usdt: roundMoney(totalCommission),
+    pl_usdt: roundMoney(pl),
+    pl_percent: roundMoney(plPercent),
     duration_minutes: durationMinutes,
   };
 }
@@ -149,7 +151,8 @@ async function closeTradeManually(db, profileId, tradeId, { exitPrice, exitTime,
 
 async function applySellExecutionFifo(db, profileId, execution) {
   const symbol = execution.symbol;
-  let qtyToClose = toNum(execution.execQty);
+  const execQtyTotal = toNum(execution.execQty);
+  let qtyToClose = execQtyTotal;
   const sellPrice = toNum(execution.execPrice);
   const sellFeeTotal = Math.abs(toNum(execution.execFee));
   const sellTime = toNum(execution.execTime);
@@ -182,7 +185,7 @@ async function applySellExecutionFifo(db, profileId, execution) {
     const entryCommissionPerUnit = openTrade.qty > 0 ? toNum(openTrade.commission_usdt) / openTrade.qty : 0;
     const entryCommissionForMatched = entryCommissionPerUnit * matchedQty;
 
-    const sellCommissionPerUnit = toNum(execution.execQty) > 0 ? sellFeeTotal / toNum(execution.execQty) : 0;
+    const sellCommissionPerUnit = execQtyTotal > 0 ? sellFeeTotal / execQtyTotal : 0;
     const sellCommissionForMatched = sellCommissionPerUnit * matchedQty;
 
     const metrics = buildClosedMetrics({
@@ -195,7 +198,10 @@ async function applySellExecutionFifo(db, profileId, execution) {
       exitTime: sellTime,
     });
 
-    if (Math.abs(matchedQty - remaining) < 1e-10) {
+    const remainingAfterRaw = remaining - matchedQty;
+    const willFullyClose = remainingAfterRaw <= DUST_QTY;
+
+    if (willFullyClose) {
       await db.run(
         `UPDATE trades
          SET status = 'CLOSED',
@@ -227,9 +233,9 @@ async function applySellExecutionFifo(db, profileId, execution) {
         ]
       );
     } else {
-      const remainingAfter = safeRound(remaining - matchedQty);
-      const remainCommission = safeRound(entryCommissionPerUnit * remainingAfter);
-      const remainInvested = safeRound(remainingAfter * toNum(openTrade.entry_price));
+      const remainingAfter = roundQty(remainingAfterRaw);
+      const remainCommission = roundMoney(entryCommissionPerUnit * remainingAfter);
+      const remainInvested = roundMoney(remainingAfter * toNum(openTrade.entry_price));
 
       await db.run(
         `UPDATE trades
@@ -273,11 +279,36 @@ async function applySellExecutionFifo(db, profileId, execution) {
       );
     }
 
-    qtyToClose = safeRound(qtyToClose - matchedQty);
+    qtyToClose = roundQty(qtyToClose - matchedQty);
+    if (qtyToClose <= DUST_QTY) qtyToClose = 0;
     closedCount += 1;
   }
 
-  return { closedCount, unmatchedQty: safeRound(qtyToClose) };
+  return { closedCount, unmatchedQty: roundQty(qtyToClose) };
+}
+
+async function closeDustOpenTrades(db, profileId) {
+  const result = await db.run(
+    `UPDATE trades
+     SET status = 'CLOSED',
+         qty = 0,
+         remaining_qty = 0,
+         invested_usdt = 0,
+         received_usdt = 0,
+         commission_usdt = 0,
+         pl_usdt = 0,
+         pl_percent = 0,
+         duration_minutes = 0,
+         exit_time = COALESCE(exit_time, entry_time),
+         exit_price = COALESCE(exit_price, entry_price),
+         source = 'bybit_dust_fix'
+     WHERE owner_profile_id = ?
+       AND status = 'OPEN'
+       AND ABS(remaining_qty) <= ?`,
+    [profileId, DUST_QTY]
+  );
+
+  return Number(result.changes || 0);
 }
 
 app.get('/api/health', (_req, res) => {
@@ -425,13 +456,13 @@ app.get('/api/stats', requireProfile, async (req, res) => {
     total_trades: total.cnt,
     open_trades: open.cnt,
     closed_trades: closed.cnt,
-    total_pl_usdt: safeRound(toNum(closedStats.total_pl_usdt)),
-    avg_pl_usdt: safeRound(toNum(closedStats.avg_pl_usdt)),
-    avg_pl_percent: safeRound(toNum(closedStats.avg_pl_percent)),
+    total_pl_usdt: roundMoney(toNum(closedStats.total_pl_usdt)),
+    avg_pl_usdt: roundMoney(toNum(closedStats.avg_pl_usdt)),
+    avg_pl_percent: roundMoney(toNum(closedStats.avg_pl_percent)),
     avg_duration_minutes: Math.round(toNum(closedStats.avg_duration_minutes)),
-    avg_win_usdt: safeRound(toNum(closedStats.avg_win_usdt)),
-    avg_loss_usdt: safeRound(toNum(closedStats.avg_loss_usdt)),
-    win_rate_percent: safeRound(winRate),
+    avg_win_usdt: roundMoney(toNum(closedStats.avg_win_usdt)),
+    avg_loss_usdt: roundMoney(toNum(closedStats.avg_loss_usdt)),
+    win_rate_percent: roundMoney(winRate),
   });
 });
 
@@ -506,7 +537,7 @@ app.post('/api/bybit/sync', requireProfile, async (req, res) => {
             qty,
             qty,
             price,
-            safeRound(qty * price),
+            roundMoney(qty * price),
             fee,
             execId || null,
             Date.now(),
@@ -522,12 +553,15 @@ app.post('/api/bybit/sync', requireProfile, async (req, res) => {
       }
     }
 
+    const dust_closed = await closeDustOpenTrades(db, req.profile.id);
+
     res.json({
       synced_days: days,
       executions_received: sorted.length,
       buys_created: createdBuys,
       sell_matches_closed: closedFromSells,
-      unmatched_sell_qty: safeRound(unmatchedSellQty),
+      unmatched_sell_qty: roundQty(unmatchedSellQty),
+      dust_closed,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
