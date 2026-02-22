@@ -568,13 +568,13 @@ button.is-loading::after {
   left: 50%;
   transform: translateX(-50%);
   bottom: 12px;
-  width: min(520px, calc(100% - 16px));
+  width: min(760px, calc(100% - 16px));
   background: rgba(12, 19, 18, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
   padding: 6px;
   display: none;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
   z-index: 60;
 }
@@ -586,6 +586,8 @@ button.is-loading::after {
   border-radius: 14px;
   box-shadow: none;
   height: 42px;
+  padding: 8px 6px;
+  font-size: 15px;
 }
 
 .history-tab-badge {

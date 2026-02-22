@@ -35,14 +35,8 @@
       </section>
 
       <div id="app-sections" class="hidden">
-        <div id="history-view">
+        <div id="spot-view">
           <section class="card stats-grid" id="stats"></section>
-
-          <section class="card">
-            <h2>Баланс</h2>
-            <div id="balance-summary" class="balance-summary">Загрузка...</div>
-            <div id="balance-list" class="balance-list"></div>
-          </section>
 
           <section class="card">
             <div class="section-head">
@@ -73,7 +67,17 @@
               </table>
             </div>
           </section>
+        </div>
 
+        <div id="balance-view" class="hidden">
+          <section class="card">
+            <h2>Баланс</h2>
+            <div id="balance-summary" class="balance-summary">Загрузка...</div>
+            <div id="balance-list" class="balance-list"></div>
+          </section>
+        </div>
+
+        <div id="p2p-view" class="hidden">
           <section class="card">
             <h2>P2P сделки</h2>
             <div id="p2p-list" class="p2p-list">Загрузка...</div>
@@ -111,9 +115,11 @@
     </div>
 
     <nav class="bottom-nav hidden" id="bottom-nav">
-      <button class="nav-btn active" id="tab-history" type="button">
-        История <span id="history-tab-badge" class="history-tab-badge hidden">0</span>
+      <button class="nav-btn active" id="tab-spot" type="button">
+        Spot <span id="spot-tab-badge" class="history-tab-badge hidden">0</span>
       </button>
+      <button class="nav-btn" id="tab-balance" type="button">Баланс</button>
+      <button class="nav-btn" id="tab-p2p" type="button">P2P</button>
       <button class="nav-btn" id="tab-profile" type="button">Профиль</button>
     </nav>
 

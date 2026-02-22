@@ -10,14 +10,18 @@ const STORAGE_TOKEN_KEY = 'trade_diary_token';
 const $authCard = document.getElementById('auth-card');
 const $authForm = document.getElementById('auth-form');
 const $appSections = document.getElementById('app-sections');
-const $historyView = document.getElementById('history-view');
+const $spotView = document.getElementById('spot-view');
+const $balanceView = document.getElementById('balance-view');
+const $p2pView = document.getElementById('p2p-view');
 const $profileView = document.getElementById('profile-view');
 const $profileInfo = document.getElementById('profile-info');
 const $changeKeysBtn = document.getElementById('change-keys-btn');
 const $profileSettingsBtn = document.getElementById('profile-settings-btn');
 const $profileSettingsPanel = document.getElementById('profile-settings-panel');
 const $bottomNav = document.getElementById('bottom-nav');
-const $tabHistory = document.getElementById('tab-history');
+const $tabSpot = document.getElementById('tab-spot');
+const $tabBalance = document.getElementById('tab-balance');
+const $tabP2P = document.getElementById('tab-p2p');
 const $tabProfile = document.getElementById('tab-profile');
 
 const $stats = document.getElementById('stats');
@@ -31,7 +35,7 @@ const $tradeModalTitle = document.getElementById('trade-modal-title');
 const $tradeModalGrid = document.getElementById('trade-modal-grid');
 const $tradeModalClose = document.getElementById('trade-modal-close');
 const $newTradesPill = document.getElementById('new-trades-pill');
-const $historyTabBadge = document.getElementById('history-tab-badge');
+const $spotTabBadge = document.getElementById('spot-tab-badge');
 
 let authToken = localStorage.getItem(STORAGE_TOKEN_KEY) || '';
 let lastSeenTradeId = 0;
@@ -96,11 +100,14 @@ function setLoggedOutView() {
 }
 
 function setActiveTab(tab) {
-  const isHistory = tab === 'history';
-  $historyView.classList.toggle('hidden', !isHistory);
-  $profileView.classList.toggle('hidden', isHistory);
-  $tabHistory.classList.toggle('active', isHistory);
-  $tabProfile.classList.toggle('active', !isHistory);
+  $spotView.classList.toggle('hidden', tab !== 'spot');
+  $balanceView.classList.toggle('hidden', tab !== 'balance');
+  $p2pView.classList.toggle('hidden', tab !== 'p2p');
+  $profileView.classList.toggle('hidden', tab !== 'profile');
+  $tabSpot.classList.toggle('active', tab === 'spot');
+  $tabBalance.classList.toggle('active', tab === 'balance');
+  $tabP2P.classList.toggle('active', tab === 'p2p');
+  $tabProfile.classList.toggle('active', tab === 'profile');
 }
 
 function setLoggedInView(profile) {
@@ -110,7 +117,7 @@ function setLoggedInView(profile) {
   $profileInfo.textContent = `Аккаунт: ${profile.api_key_masked} (${profile.base_url})`;
   $profileSettingsPanel.classList.add('hidden');
   lastSeenTradeId = Number(profile.last_read_trade_id || 0);
-  setActiveTab('history');
+  setActiveTab('spot');
   startAutoRefreshLoop();
 }
 
@@ -270,11 +277,11 @@ function setNewTradesIndicator(count) {
   if (safeCount > 0) {
     $newTradesPill.textContent = `Новые: ${safeCount}`;
     $newTradesPill.classList.remove('hidden');
-    $historyTabBadge.textContent = String(safeCount);
-    $historyTabBadge.classList.remove('hidden');
+    $spotTabBadge.textContent = String(safeCount);
+    $spotTabBadge.classList.remove('hidden');
   } else {
     $newTradesPill.classList.add('hidden');
-    $historyTabBadge.classList.add('hidden');
+    $spotTabBadge.classList.add('hidden');
   }
 }
 
@@ -352,7 +359,9 @@ function markAllTradesAsRead() {
       setNewTradesIndicator(0);
       return loadTrades();
     })
-    .catch(() => {});
+    .catch((err) => {
+      alert(err.message || 'Не удалось отметить сделки как прочитанные');
+    });
 }
 
 async function autoSyncAndRefresh() {
@@ -360,6 +369,12 @@ async function autoSyncAndRefresh() {
     await api('/api/bybit/auto-sync', { method: 'POST' });
   } catch (_err) {
     // Ignore transient sync errors, existing saved history should remain visible.
+  }
+  try {
+    const profile = await api('/api/auth/me');
+    lastSeenTradeId = Number(profile.last_read_trade_id || lastSeenTradeId);
+  } catch (_err) {
+    // keep current in-memory value
   }
   await refreshAll();
 }
@@ -453,7 +468,9 @@ $tradeModal.addEventListener('click', (e) => {
   if (e.target === $tradeModal) closeTradeModal();
 });
 
-$tabHistory.addEventListener('click', () => setActiveTab('history'));
+$tabSpot.addEventListener('click', () => setActiveTab('spot'));
+$tabBalance.addEventListener('click', () => setActiveTab('balance'));
+$tabP2P.addEventListener('click', () => setActiveTab('p2p'));
 $tabProfile.addEventListener('click', () => setActiveTab('profile'));
 
 async function bootstrap() {
