@@ -38,7 +38,8 @@ async function getDb() {
         created_at INTEGER NOT NULL
       );
 
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_buy_exec_id ON trades(buy_exec_id);
+      DROP INDEX IF EXISTS idx_trades_buy_exec_id;
+      CREATE INDEX IF NOT EXISTS idx_trades_buy_exec_id ON trades(buy_exec_id);
       CREATE INDEX IF NOT EXISTS idx_trades_symbol_status ON trades(symbol, status);
     `);
   }
