@@ -147,6 +147,7 @@ $authForm.addEventListener('submit', async (e) => {
 });
 
 $changeKeysBtn.addEventListener('click', () => {
+  api('/api/auth/logout', { method: 'POST' }).catch(() => {});
   authToken = '';
   localStorage.removeItem(STORAGE_TOKEN_KEY);
   setLoggedOutView();
@@ -202,11 +203,6 @@ $syncBtn.addEventListener('click', async () => {
 });
 
 async function bootstrap() {
-  if (!authToken) {
-    setLoggedOutView();
-    return;
-  }
-
   try {
     const profile = await api('/api/auth/me');
     setLoggedInView(profile);

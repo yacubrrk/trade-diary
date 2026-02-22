@@ -44,10 +44,42 @@ function makePublicId() {
   return crypto.randomBytes(24).toString('hex');
 }
 
+function extractCookieToken(req) {
+  const rawCookie = String(req.headers.cookie || '');
+  if (!rawCookie) return '';
+
+  for (const pair of rawCookie.split(';')) {
+    const [key, ...rest] = pair.trim().split('=');
+    if (key === 'td_token') {
+      return decodeURIComponent(rest.join('=').trim());
+    }
+  }
+  return '';
+}
+
 function extractBearerToken(req) {
   const auth = String(req.headers.authorization || '');
-  if (!auth.startsWith('Bearer ')) return '';
-  return auth.slice(7).trim();
+  if (auth.startsWith('Bearer ')) return auth.slice(7).trim();
+  return extractCookieToken(req);
+}
+
+function setAuthCookie(res, token) {
+  res.cookie('td_token', token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 1000 * 60 * 60 * 24 * 365,
+  });
+}
+
+function clearAuthCookie(res) {
+  res.clearCookie('td_token', {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax',
+    path: '/',
+  });
 }
 
 async function requireProfile(req, res, next) {
@@ -273,6 +305,7 @@ app.post('/api/auth/register', async (req, res) => {
          WHERE id = ?`,
         [apiSecret, baseUrl, recvWindow, existing.id]
       );
+      setAuthCookie(res, existing.public_id);
 
       return res.json({
         token: existing.public_id,
@@ -292,6 +325,7 @@ app.post('/api/auth/register', async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?)`,
       [publicId, apiKey, apiSecret, baseUrl, recvWindow, now]
     );
+    setAuthCookie(res, publicId);
 
     res.status(201).json({
       token: publicId,
@@ -313,6 +347,11 @@ app.get('/api/auth/me', requireProfile, async (req, res) => {
     api_key_masked: apiKey ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}` : '',
     base_url: req.profile.base_url,
   });
+});
+
+app.post('/api/auth/logout', (_req, res) => {
+  clearAuthCookie(res);
+  res.json({ ok: true });
 });
 
 app.get('/api/trades', requireProfile, async (req, res) => {
