@@ -190,7 +190,13 @@ async function refreshAll() {
 
 $authForm.addEventListener('submit', async (e) => {
   e.preventDefault();
+  const submitBtn = $authForm.querySelector('button[type="submit"]');
   try {
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.classList.add('is-loading');
+    }
+
     const payload = {
       api_key: $authForm.elements.api_key.value.trim(),
       api_secret: $authForm.elements.api_secret.value.trim(),
@@ -208,6 +214,11 @@ $authForm.addEventListener('submit', async (e) => {
     $authForm.reset();
   } catch (err) {
     alert(err.message);
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.classList.remove('is-loading');
+    }
   }
 });
 
@@ -221,6 +232,7 @@ $changeKeysBtn.addEventListener('click', () => {
 $syncBtn.addEventListener('click', async () => {
   try {
     $syncBtn.disabled = true;
+    $syncBtn.classList.add('is-loading');
     $syncBtn.textContent = 'Синхронизация...';
 
     const days = Number($syncDays.value || 7);
@@ -239,6 +251,7 @@ $syncBtn.addEventListener('click', async () => {
     alert(err.message);
   } finally {
     $syncBtn.disabled = false;
+    $syncBtn.classList.remove('is-loading');
     $syncBtn.textContent = 'Синхронизировать';
   }
 });
