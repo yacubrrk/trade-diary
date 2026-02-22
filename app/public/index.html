@@ -14,41 +14,6 @@
       <section class="card stats-grid" id="stats"></section>
 
       <section class="card">
-        <h2>Добавить сделку вручную</h2>
-        <form id="trade-form" class="grid-form">
-          <label>
-            Токен (пример: BTCUSDT)
-            <input type="text" name="symbol" required />
-          </label>
-          <label>
-            Количество
-            <input type="number" name="qty" step="0.000001" min="0" required />
-          </label>
-          <label>
-            Цена входа
-            <input type="number" name="entry_price" step="0.000001" min="0" required />
-          </label>
-          <label>
-            Комиссия входа (USDT)
-            <input type="number" name="commission_usdt" step="0.000001" min="0" value="0" />
-          </label>
-          <label>
-            Цена выхода (если уже закрыта)
-            <input type="number" name="exit_price" step="0.000001" min="0" />
-          </label>
-          <label>
-            Время входа
-            <input type="datetime-local" name="entry_time" required />
-          </label>
-          <label>
-            Время выхода (если есть)
-            <input type="datetime-local" name="exit_time" />
-          </label>
-          <button type="submit">Сохранить сделку</button>
-        </form>
-      </section>
-
-      <section class="card">
         <h2>Синхронизация с Bybit</h2>
         <div class="sync-row">
           <label>

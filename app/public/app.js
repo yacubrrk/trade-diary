@@ -6,23 +6,11 @@ if (tg) {
 
 const $stats = document.getElementById('stats');
 const $tbody = document.getElementById('trades-body');
-const $form = document.getElementById('trade-form');
 const $syncBtn = document.getElementById('sync-btn');
 const $syncDays = document.getElementById('sync-days');
 
 const fmt = (n) => (n === null || n === undefined ? '-' : Number(n).toFixed(4));
 const fmtTime = (ms) => (ms ? new Date(Number(ms)).toLocaleString() : '-');
-
-function toTimestamp(inputValue) {
-  return inputValue ? new Date(inputValue).getTime() : null;
-}
-
-function setDefaultEntryTime() {
-  const input = $form.elements.entry_time;
-  const dt = new Date();
-  dt.setMinutes(dt.getMinutes() - dt.getTimezoneOffset());
-  input.value = dt.toISOString().slice(0, 16);
-}
 
 async function api(path, options = {}) {
   const res = await fetch(path, {
@@ -98,32 +86,6 @@ async function refreshAll() {
   await Promise.all([loadStats(), loadTrades()]);
 }
 
-$form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  try {
-    const payload = {
-      symbol: $form.elements.symbol.value,
-      qty: Number($form.elements.qty.value),
-      entry_price: Number($form.elements.entry_price.value),
-      commission_usdt: Number($form.elements.commission_usdt.value || 0),
-      entry_time: toTimestamp($form.elements.entry_time.value),
-      exit_price: $form.elements.exit_price.value ? Number($form.elements.exit_price.value) : undefined,
-      exit_time: toTimestamp($form.elements.exit_time.value) || undefined,
-    };
-
-    await api('/api/trades', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-
-    $form.reset();
-    setDefaultEntryTime();
-    await refreshAll();
-  } catch (err) {
-    alert(err.message);
-  }
-});
-
 $tbody.addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-close-id]');
   if (!btn) return;
@@ -172,6 +134,4 @@ $syncBtn.addEventListener('click', async () => {
     $syncBtn.textContent = 'Синхронизировать';
   }
 });
-
-setDefaultEntryTime();
 refreshAll().catch((e) => alert(e.message));
