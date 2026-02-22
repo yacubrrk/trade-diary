@@ -315,6 +315,58 @@ async function closeDustOpenTrades(db, profileId) {
   return Number(result.changes || 0);
 }
 
+function normalizeExecutions(executions) {
+  const groups = new Map();
+
+  for (const raw of executions || []) {
+    const side = String(raw.side || '').toUpperCase();
+    const symbol = String(raw.symbol || '').toUpperCase();
+    const qty = toNum(raw.execQty);
+    const price = toNum(raw.execPrice);
+    const fee = Math.abs(toNum(raw.execFee));
+    const execTime = toNum(raw.execTime);
+    const orderId = String(raw.orderId || '').trim();
+    const execId = String(raw.execId || '').trim();
+
+    if (!symbol || !side || qty <= 0 || price <= 0 || execTime <= 0) continue;
+
+    const groupKey = orderId ? `${symbol}|${side}|${orderId}` : `${symbol}|${side}|${execId || execTime}`;
+    const quote = qty * price;
+
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        symbol,
+        side,
+        orderId,
+        execId: execId || `agg_${groupKey}`,
+        execQty: 0,
+        execFee: 0,
+        quoteSum: 0,
+        execTime,
+      });
+    }
+
+    const g = groups.get(groupKey);
+    g.execQty += qty;
+    g.execFee += fee;
+    g.quoteSum += quote;
+    if (execTime > g.execTime) g.execTime = execTime;
+  }
+
+  return Array.from(groups.values())
+    .map((g) => ({
+      symbol: g.symbol,
+      side: g.side,
+      orderId: g.orderId || null,
+      execId: g.orderId || g.execId,
+      execQty: roundQty(g.execQty),
+      execFee: roundMoney(g.execFee),
+      execPrice: g.execQty > 0 ? g.quoteSum / g.execQty : 0,
+      execTime: g.execTime,
+    }))
+    .sort((a, b) => toNum(a.execTime) - toNum(b.execTime));
+}
+
 async function syncBybitForProfile(db, profile, days) {
   const apiKey = profile.api_key;
   const apiSecret = profile.api_secret;
@@ -335,7 +387,7 @@ async function syncBybitForProfile(db, profile, days) {
     limit: 200,
   });
 
-  const sorted = executions.sort((a, b) => toNum(a.execTime) - toNum(b.execTime));
+  const sorted = normalizeExecutions(executions);
 
   let createdBuys = 0;
   let closedFromSells = 0;

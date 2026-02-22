@@ -369,6 +369,11 @@ button.is-loading::after {
   animation: riseIn 0.22s ease both;
 }
 
+.trade-item-unread {
+  border-color: rgba(240, 141, 26, 0.5);
+  box-shadow: 0 10px 22px rgba(240, 141, 26, 0.2);
+}
+
 .trade-item:active {
   transform: scale(0.992);
 }
@@ -401,6 +406,27 @@ button.is-loading::after {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.trades-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 0 8px;
+}
+
+.trades-section-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.mark-read-btn {
+  width: auto;
+  min-height: 30px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
 }
 
 .trade-modal {
@@ -582,6 +608,10 @@ tr:hover td {
   background: rgba(31, 138, 90, 0.045);
 }
 
+tr.trade-unread td {
+  background: rgba(255, 191, 47, 0.09);
+}
+
 small {
   color: var(--muted);
   font-size: 11px;
@@ -635,6 +665,10 @@ small {
 
   .profile-settings-btn {
     width: 40px;
+  }
+
+  .mark-read-btn {
+    width: auto;
   }
 
   .section-head {

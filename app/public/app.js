@@ -84,11 +84,6 @@ function setActiveTab(tab) {
   $profileView.classList.toggle('hidden', isHistory);
   $tabHistory.classList.toggle('active', isHistory);
   $tabProfile.classList.toggle('active', !isHistory);
-  if (isHistory && latestTradeId > lastSeenTradeId) {
-    lastSeenTradeId = latestTradeId;
-    localStorage.setItem(getSeenTradeStorageKey(), String(lastSeenTradeId));
-    setNewTradesIndicator(0);
-  }
 }
 
 function setLoggedInView(profile) {
@@ -168,14 +163,17 @@ async function loadTrades() {
     localStorage.setItem(seenKey, String(lastSeenTradeId));
   }
   const unreadCount = visibleTrades.filter((t) => Number(t.id || 0) > lastSeenTradeId).length;
+  const unreadTrades = visibleTrades.filter((t) => Number(t.id || 0) > lastSeenTradeId);
+  const readTrades = visibleTrades.filter((t) => Number(t.id || 0) <= lastSeenTradeId);
   setNewTradesIndicator(unreadCount);
 
   $tbody.innerHTML = visibleTrades
     .map((t) => {
       const pl = t.pl_usdt;
       const plClass = pl === null ? '' : pl >= 0 ? 'good' : 'bad';
+      const unreadClass = Number(t.id || 0) > lastSeenTradeId ? 'trade-unread' : '';
       return `
-        <tr>
+        <tr class="${unreadClass}">
           <td>${t.id}</td>
           <td>${t.symbol}</td>
           <td>${t.status}</td>
@@ -194,12 +192,12 @@ async function loadTrades() {
     })
     .join('');
 
-  $mobileTrades.innerHTML = visibleTrades
-    .map((t) => {
+  const renderTradeCard = (t, unread = false) => {
       const pl = Number(t.pl_usdt);
       const plClass = Number.isFinite(pl) ? (pl >= 0 ? 'good' : 'bad') : '';
+      const unreadClass = unread ? 'trade-item-unread' : '';
       return `
-        <article class="trade-item" data-trade-id="${t.id}">
+        <article class="trade-item ${unreadClass}" data-trade-id="${t.id}">
           <div class="trade-item-top">
             <div>
               <div class="trade-item-symbol">${t.symbol}</div>
@@ -214,8 +212,25 @@ async function loadTrades() {
           </div>
         </article>
       `;
-    })
-    .join('');
+    };
+
+  const unreadSection = unreadTrades.length
+    ? `
+      <div class="trades-section-head">
+        <h3>Непрочитанные</h3>
+        <button class="mark-read-btn" id="mark-read-btn" type="button">Прочитать все</button>
+      </div>
+      ${unreadTrades.map((t) => renderTradeCard(t, true)).join('')}
+      `
+    : '';
+  const readSection = `
+    <div class="trades-section-head">
+      <h3>${unreadTrades.length ? 'Прочитанные' : 'Сделки'}</h3>
+    </div>
+    ${readTrades.map((t) => renderTradeCard(t)).join('')}
+  `;
+
+  $mobileTrades.innerHTML = `${unreadSection}${readSection}`;
 
   $mobileTrades.querySelectorAll('.trade-item').forEach((item) => {
     item.addEventListener('click', () => {
@@ -225,6 +240,14 @@ async function loadTrades() {
       openTradeModal(trade);
     });
   });
+
+  const markReadBtn = document.getElementById('mark-read-btn');
+  if (markReadBtn) {
+    markReadBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      markAllTradesAsRead();
+    });
+  }
 }
 
 async function refreshAll() {
@@ -242,6 +265,14 @@ function setNewTradesIndicator(count) {
     $newTradesPill.classList.add('hidden');
     $historyTabBadge.classList.add('hidden');
   }
+}
+
+function markAllTradesAsRead() {
+  if (latestTradeId <= 0) return;
+  lastSeenTradeId = latestTradeId;
+  localStorage.setItem(getSeenTradeStorageKey(), String(lastSeenTradeId));
+  setNewTradesIndicator(0);
+  loadTrades().catch(() => {});
 }
 
 async function autoSyncAndRefresh() {
