@@ -4,21 +4,57 @@ if (tg) {
   tg.expand();
 }
 
+const STORAGE_TOKEN_KEY = 'trade_diary_token';
+
+const $authCard = document.getElementById('auth-card');
+const $authForm = document.getElementById('auth-form');
+const $appSections = document.getElementById('app-sections');
+const $profileCard = document.getElementById('profile-card');
+const $profileInfo = document.getElementById('profile-info');
+const $changeKeysBtn = document.getElementById('change-keys-btn');
+
 const $stats = document.getElementById('stats');
 const $tbody = document.getElementById('trades-body');
 const $syncBtn = document.getElementById('sync-btn');
 const $syncDays = document.getElementById('sync-days');
 
+let authToken = localStorage.getItem(STORAGE_TOKEN_KEY) || '';
+
 const fmt = (n) => (n === null || n === undefined ? '-' : Number(n).toFixed(4));
+const fmtQty = (n) => (n === null || n === undefined ? '-' : Number(n).toFixed(8));
 const fmtTime = (ms) => (ms ? new Date(Number(ms)).toLocaleString() : '-');
 
+function setLoggedOutView() {
+  $authCard.classList.remove('hidden');
+  $appSections.classList.add('hidden');
+  $profileCard.classList.add('hidden');
+  $tbody.innerHTML = '';
+  $stats.innerHTML = '';
+}
+
+function setLoggedInView(profile) {
+  $authCard.classList.add('hidden');
+  $appSections.classList.remove('hidden');
+  $profileCard.classList.remove('hidden');
+  $profileInfo.textContent = `Аккаунт: ${profile.api_key_masked} (${profile.base_url})`;
+}
+
 async function api(path, options = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(options.headers || {}),
+  };
+
+  if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
+
   const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers,
   });
 
-  const body = await res.json();
+  const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || 'Ошибка API');
   return body;
 }
@@ -65,7 +101,7 @@ async function loadTrades() {
           <td>${t.id}</td>
           <td>${t.symbol}</td>
           <td>${t.status}</td>
-          <td>${fmt(t.qty)}</td>
+          <td>${fmtQty(t.qty)}</td>
           <td>${fmt(t.entry_price)}<br><small>${fmtTime(t.entry_time)}</small></td>
           <td>${t.exit_price ? fmt(t.exit_price) : '-'}<br><small>${fmtTime(t.exit_time)}</small></td>
           <td>${fmt(t.invested_usdt)}</td>
@@ -85,6 +121,36 @@ async function loadTrades() {
 async function refreshAll() {
   await Promise.all([loadStats(), loadTrades()]);
 }
+
+$authForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    const payload = {
+      api_key: $authForm.elements.api_key.value.trim(),
+      api_secret: $authForm.elements.api_secret.value.trim(),
+      base_url: $authForm.elements.base_url.value,
+    };
+
+    const result = await api('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+
+    authToken = result.token;
+    localStorage.setItem(STORAGE_TOKEN_KEY, authToken);
+    setLoggedInView(result.profile);
+    await refreshAll();
+    $authForm.reset();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+$changeKeysBtn.addEventListener('click', () => {
+  authToken = '';
+  localStorage.removeItem(STORAGE_TOKEN_KEY);
+  setLoggedOutView();
+});
 
 $tbody.addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-close-id]');
@@ -134,4 +200,22 @@ $syncBtn.addEventListener('click', async () => {
     $syncBtn.textContent = 'Синхронизировать';
   }
 });
-refreshAll().catch((e) => alert(e.message));
+
+async function bootstrap() {
+  if (!authToken) {
+    setLoggedOutView();
+    return;
+  }
+
+  try {
+    const profile = await api('/api/auth/me');
+    setLoggedInView(profile);
+    await refreshAll();
+  } catch (_err) {
+    authToken = '';
+    localStorage.removeItem(STORAGE_TOKEN_KEY);
+    setLoggedOutView();
+  }
+}
+
+bootstrap().catch((e) => alert(e.message));

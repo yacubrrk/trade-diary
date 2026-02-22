@@ -1,4 +1,5 @@
 const path = require('path');
+const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
@@ -39,8 +40,38 @@ function buildClosedMetrics({ qty, entryPrice, exitPrice, entryCommission, exitC
   };
 }
 
-async function closeTradeManually(db, tradeId, { exitPrice, exitTime, exitCommission = 0 }) {
-  const trade = await db.get('SELECT * FROM trades WHERE id = ?', [tradeId]);
+function makePublicId() {
+  return crypto.randomBytes(24).toString('hex');
+}
+
+function extractBearerToken(req) {
+  const auth = String(req.headers.authorization || '');
+  if (!auth.startsWith('Bearer ')) return '';
+  return auth.slice(7).trim();
+}
+
+async function requireProfile(req, res, next) {
+  try {
+    const token = extractBearerToken(req);
+    if (!token) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const db = await getDb();
+    const profile = await db.get('SELECT * FROM profiles WHERE public_id = ? LIMIT 1', [token]);
+    if (!profile) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    req.profile = profile;
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+async function closeTradeManually(db, profileId, tradeId, { exitPrice, exitTime, exitCommission = 0 }) {
+  const trade = await db.get('SELECT * FROM trades WHERE id = ? AND owner_profile_id = ?', [tradeId, profileId]);
   if (!trade) {
     throw new Error('Trade not found');
   }
@@ -69,7 +100,7 @@ async function closeTradeManually(db, tradeId, { exitPrice, exitTime, exitCommis
          pl_usdt = ?,
          pl_percent = ?,
          duration_minutes = ?
-     WHERE id = ?`,
+     WHERE id = ? AND owner_profile_id = ?`,
     [
       exitTime,
       exitPrice,
@@ -79,11 +110,12 @@ async function closeTradeManually(db, tradeId, { exitPrice, exitTime, exitCommis
       metrics.pl_percent,
       metrics.duration_minutes,
       tradeId,
+      profileId,
     ]
   );
 }
 
-async function applySellExecutionFifo(db, execution) {
+async function applySellExecutionFifo(db, profileId, execution) {
   const symbol = execution.symbol;
   let qtyToClose = toNum(execution.execQty);
   const sellPrice = toNum(execution.execPrice);
@@ -99,10 +131,13 @@ async function applySellExecutionFifo(db, execution) {
   while (qtyToClose > 1e-10) {
     const openTrade = await db.get(
       `SELECT * FROM trades
-       WHERE symbol = ? AND status = 'OPEN' AND remaining_qty > 0
+       WHERE owner_profile_id = ?
+         AND symbol = ?
+         AND status = 'OPEN'
+         AND remaining_qty > 0
        ORDER BY entry_time ASC, id ASC
        LIMIT 1`,
-      [symbol]
+      [profileId, symbol]
     );
 
     if (!openTrade) {
@@ -143,7 +178,7 @@ async function applySellExecutionFifo(db, execution) {
              pl_percent = ?,
              duration_minutes = ?,
              sell_exec_id = ?
-         WHERE id = ?`,
+         WHERE id = ? AND owner_profile_id = ?`,
         [
           matchedQty,
           metrics.invested_usdt,
@@ -156,6 +191,7 @@ async function applySellExecutionFifo(db, execution) {
           metrics.duration_minutes,
           execId,
           openTrade.id,
+          profileId,
         ]
       );
     } else {
@@ -166,12 +202,13 @@ async function applySellExecutionFifo(db, execution) {
       await db.run(
         `UPDATE trades
          SET qty = ?, remaining_qty = ?, invested_usdt = ?, commission_usdt = ?
-         WHERE id = ?`,
-        [remainingAfter, remainingAfter, remainInvested, remainCommission, openTrade.id]
+         WHERE id = ? AND owner_profile_id = ?`,
+        [remainingAfter, remainingAfter, remainInvested, remainCommission, openTrade.id, profileId]
       );
 
       await db.run(
         `INSERT INTO trades (
+          owner_profile_id,
           symbol, entry_time, exit_time,
           qty, remaining_qty,
           entry_price, exit_price,
@@ -182,8 +219,9 @@ async function applySellExecutionFifo(db, execution) {
           status, source,
           buy_exec_id, sell_exec_id,
           created_at
-        ) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, 'CLOSED', 'bybit', ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, 'CLOSED', 'bybit', ?, ?, ?)`,
         [
+          profileId,
           symbol,
           toNum(openTrade.entry_time),
           sellTime,
@@ -214,123 +252,86 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'trade-diary' });
 });
 
-app.get('/api/trades', async (req, res) => {
-  const db = await getDb();
-  const status = (req.query.status || '').toUpperCase();
-
-  const rows = status
-    ? await db.all('SELECT * FROM trades WHERE status = ? ORDER BY entry_time DESC, id DESC', [status])
-    : await db.all('SELECT * FROM trades ORDER BY entry_time DESC, id DESC');
-
-  res.json(rows);
-});
-
-app.post('/api/trades', async (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   try {
     const db = await getDb();
+    const apiKey = String(req.body.api_key || '').trim();
+    const apiSecret = String(req.body.api_secret || '').trim();
+    const baseUrl = String(req.body.base_url || 'https://api.bybit.com').trim();
+    const recvWindow = Math.max(1000, Math.min(15000, Number(req.body.recv_window || 5000)));
+
+    if (!apiKey || !apiSecret) {
+      return res.status(400).json({ error: 'api_key and api_secret are required' });
+    }
+
+    const existing = await db.get('SELECT * FROM profiles WHERE api_key = ? LIMIT 1', [apiKey]);
+
+    if (existing) {
+      await db.run(
+        `UPDATE profiles
+         SET api_secret = ?, base_url = ?, recv_window = ?
+         WHERE id = ?`,
+        [apiSecret, baseUrl, recvWindow, existing.id]
+      );
+
+      return res.json({
+        token: existing.public_id,
+        profile: {
+          id: existing.id,
+          api_key_masked: `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`,
+          base_url: baseUrl,
+        },
+      });
+    }
+
+    const publicId = makePublicId();
     const now = Date.now();
 
-    const symbol = String(req.body.symbol || '').toUpperCase().trim();
-    const qty = toNum(req.body.qty);
-    const entryPrice = toNum(req.body.entry_price);
-    const entryTime = toNum(req.body.entry_time, now);
-    const exitPrice = toNum(req.body.exit_price);
-    const exitTime = toNum(req.body.exit_time);
-    const commission = Math.abs(toNum(req.body.commission_usdt));
-
-    if (!symbol || qty <= 0 || entryPrice <= 0) {
-      return res.status(400).json({ error: 'symbol, qty, entry_price are required' });
-    }
-
-    let row = {
-      symbol,
-      entry_time: entryTime,
-      exit_time: null,
-      qty,
-      remaining_qty: qty,
-      entry_price: entryPrice,
-      exit_price: null,
-      invested_usdt: safeRound(qty * entryPrice),
-      received_usdt: null,
-      commission_usdt: commission,
-      pl_usdt: null,
-      pl_percent: null,
-      duration_minutes: null,
-      status: 'OPEN',
-      source: 'manual',
-      buy_exec_id: null,
-      sell_exec_id: null,
-      created_at: now,
-    };
-
-    if (exitPrice > 0 && exitTime > 0) {
-      const metrics = buildClosedMetrics({
-        qty,
-        entryPrice,
-        exitPrice,
-        entryCommission: commission,
-        exitCommission: 0,
-        entryTime,
-        exitTime,
-      });
-
-      row = {
-        ...row,
-        exit_time: exitTime,
-        exit_price: exitPrice,
-        received_usdt: metrics.received_usdt,
-        commission_usdt: metrics.commission_usdt,
-        pl_usdt: metrics.pl_usdt,
-        pl_percent: metrics.pl_percent,
-        duration_minutes: metrics.duration_minutes,
-        remaining_qty: 0,
-        status: 'CLOSED',
-      };
-    }
-
     const result = await db.run(
-      `INSERT INTO trades (
-        symbol, entry_time, exit_time,
-        qty, remaining_qty,
-        entry_price, exit_price,
-        invested_usdt, received_usdt,
-        commission_usdt,
-        pl_usdt, pl_percent,
-        duration_minutes,
-        status, source,
-        buy_exec_id, sell_exec_id,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        row.symbol,
-        row.entry_time,
-        row.exit_time,
-        row.qty,
-        row.remaining_qty,
-        row.entry_price,
-        row.exit_price,
-        row.invested_usdt,
-        row.received_usdt,
-        row.commission_usdt,
-        row.pl_usdt,
-        row.pl_percent,
-        row.duration_minutes,
-        row.status,
-        row.source,
-        row.buy_exec_id,
-        row.sell_exec_id,
-        row.created_at,
-      ]
+      `INSERT INTO profiles (public_id, api_key, api_secret, base_url, recv_window, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [publicId, apiKey, apiSecret, baseUrl, recvWindow, now]
     );
 
-    const inserted = await db.get('SELECT * FROM trades WHERE id = ?', [result.lastID]);
-    res.status(201).json(inserted);
+    res.status(201).json({
+      token: publicId,
+      profile: {
+        id: result.lastID,
+        api_key_masked: `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`,
+        base_url: baseUrl,
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.put('/api/trades/:id/close', async (req, res) => {
+app.get('/api/auth/me', requireProfile, async (req, res) => {
+  const apiKey = String(req.profile.api_key || '');
+  res.json({
+    id: req.profile.id,
+    api_key_masked: apiKey ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}` : '',
+    base_url: req.profile.base_url,
+  });
+});
+
+app.get('/api/trades', requireProfile, async (req, res) => {
+  const db = await getDb();
+  const status = (req.query.status || '').toUpperCase();
+
+  const rows = status
+    ? await db.all(
+        'SELECT * FROM trades WHERE owner_profile_id = ? AND status = ? ORDER BY entry_time DESC, id DESC',
+        [req.profile.id, status]
+      )
+    : await db.all('SELECT * FROM trades WHERE owner_profile_id = ? ORDER BY entry_time DESC, id DESC', [
+        req.profile.id,
+      ]);
+
+  res.json(rows);
+});
+
+app.put('/api/trades/:id/close', requireProfile, async (req, res) => {
   try {
     const db = await getDb();
     const tradeId = Number(req.params.id);
@@ -342,20 +343,28 @@ app.put('/api/trades/:id/close', async (req, res) => {
       return res.status(400).json({ error: 'valid trade id and exit_price are required' });
     }
 
-    await closeTradeManually(db, tradeId, { exitPrice, exitTime, exitCommission });
-    const updated = await db.get('SELECT * FROM trades WHERE id = ?', [tradeId]);
+    await closeTradeManually(db, req.profile.id, tradeId, { exitPrice, exitTime, exitCommission });
+    const updated = await db.get('SELECT * FROM trades WHERE id = ? AND owner_profile_id = ?', [
+      tradeId,
+      req.profile.id,
+    ]);
     res.json(updated);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-app.get('/api/stats', async (_req, res) => {
+app.get('/api/stats', requireProfile, async (req, res) => {
   const db = await getDb();
 
-  const total = await db.get('SELECT COUNT(*) as cnt FROM trades');
-  const open = await db.get("SELECT COUNT(*) as cnt FROM trades WHERE status = 'OPEN'");
-  const closed = await db.get("SELECT COUNT(*) as cnt FROM trades WHERE status = 'CLOSED'");
+  const total = await db.get('SELECT COUNT(*) as cnt FROM trades WHERE owner_profile_id = ?', [req.profile.id]);
+  const open = await db.get("SELECT COUNT(*) as cnt FROM trades WHERE owner_profile_id = ? AND status = 'OPEN'", [
+    req.profile.id,
+  ]);
+  const closed = await db.get(
+    "SELECT COUNT(*) as cnt FROM trades WHERE owner_profile_id = ? AND status = 'CLOSED'",
+    [req.profile.id]
+  );
 
   const closedStats = await db.get(
     `SELECT
@@ -364,11 +373,11 @@ app.get('/api/stats', async (_req, res) => {
       COALESCE(AVG(pl_percent), 0) as avg_pl_percent,
       COALESCE(AVG(duration_minutes), 0) as avg_duration_minutes,
       COALESCE(SUM(CASE WHEN pl_usdt > 0 THEN 1 ELSE 0 END), 0) as wins,
-      COALESCE(SUM(CASE WHEN pl_usdt < 0 THEN 1 ELSE 0 END), 0) as losses,
       COALESCE(AVG(CASE WHEN pl_usdt > 0 THEN pl_usdt END), 0) as avg_win_usdt,
       COALESCE(AVG(CASE WHEN pl_usdt < 0 THEN pl_usdt END), 0) as avg_loss_usdt
     FROM trades
-    WHERE status = 'CLOSED'`
+    WHERE owner_profile_id = ? AND status = 'CLOSED'`,
+    [req.profile.id]
   );
 
   const winRate = closed.cnt > 0 ? (closedStats.wins / closed.cnt) * 100 : 0;
@@ -387,17 +396,13 @@ app.get('/api/stats', async (_req, res) => {
   });
 });
 
-app.post('/api/bybit/sync', async (req, res) => {
+app.post('/api/bybit/sync', requireProfile, async (req, res) => {
   try {
     const db = await getDb();
-    const apiKey = process.env.BYBIT_API_KEY;
-    const apiSecret = process.env.BYBIT_API_SECRET;
-    const recvWindow = Number(process.env.BYBIT_RECV_WINDOW || 5000);
-    const baseUrl = process.env.BYBIT_BASE_URL || 'https://api.bybit.com';
-
-    if (!apiKey || !apiSecret) {
-      return res.status(400).json({ error: 'Set BYBIT_API_KEY and BYBIT_API_SECRET in .env' });
-    }
+    const apiKey = req.profile.api_key;
+    const apiSecret = req.profile.api_secret;
+    const recvWindow = Number(req.profile.recv_window || 5000);
+    const baseUrl = req.profile.base_url || 'https://api.bybit.com';
 
     const days = Math.max(1, Math.min(30, Number(req.body.days || 7)));
     const endTime = Date.now();
@@ -413,9 +418,6 @@ app.post('/api/bybit/sync', async (req, res) => {
       limit: 200,
     });
 
-    // Bybit already scopes this endpoint by `category=spot` in request params.
-    // Some responses do not include `category` per row, so filtering by row field
-    // can incorrectly drop all executions.
     const sorted = executions.sort((a, b) => toNum(a.execTime) - toNum(b.execTime));
 
     let createdBuys = 0;
@@ -437,12 +439,16 @@ app.post('/api/bybit/sync', async (req, res) => {
 
       if (side === 'BUY') {
         if (execId) {
-          const exists = await db.get('SELECT id FROM trades WHERE buy_exec_id = ? LIMIT 1', [execId]);
+          const exists = await db.get(
+            'SELECT id FROM trades WHERE owner_profile_id = ? AND buy_exec_id = ? LIMIT 1',
+            [req.profile.id, execId]
+          );
           if (exists) continue;
         }
 
         await db.run(
           `INSERT INTO trades (
+            owner_profile_id,
             symbol, entry_time, exit_time,
             qty, remaining_qty,
             entry_price, exit_price,
@@ -453,8 +459,9 @@ app.post('/api/bybit/sync', async (req, res) => {
             status, source,
             buy_exec_id, sell_exec_id,
             created_at
-          ) VALUES (?, ?, NULL, ?, ?, ?, NULL, ?, NULL, ?, NULL, NULL, NULL, 'OPEN', 'bybit', ?, NULL, ?)`,
+          ) VALUES (?, ?, ?, NULL, ?, ?, ?, NULL, ?, NULL, ?, NULL, NULL, NULL, 'OPEN', 'bybit', ?, NULL, ?)`,
           [
+            req.profile.id,
             symbol,
             execTime,
             qty,
@@ -470,7 +477,7 @@ app.post('/api/bybit/sync', async (req, res) => {
       }
 
       if (side === 'SELL') {
-        const result = await applySellExecutionFifo(db, ex);
+        const result = await applySellExecutionFifo(db, req.profile.id, ex);
         closedFromSells += result.closedCount;
         unmatchedSellQty += toNum(result.unmatchedQty);
       }

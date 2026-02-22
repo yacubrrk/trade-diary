@@ -11,46 +11,75 @@
     <main class="container">
       <h1>Дневник сделок (Bybit Spot)</h1>
 
-      <section class="card stats-grid" id="stats"></section>
-
-      <section class="card">
-        <h2>Синхронизация с Bybit</h2>
-        <div class="sync-row">
+      <section class="card" id="auth-card">
+        <h2>Регистрация по ключам Bybit</h2>
+        <form id="auth-form" class="grid-form">
           <label>
-            За сколько дней подтянуть сделки
-            <input type="number" id="sync-days" value="7" min="1" max="30" />
+            API Key
+            <input type="text" name="api_key" required />
           </label>
-          <button id="sync-btn">Синхронизировать</button>
-        </div>
-        <p class="hint">Для работы нужны API ключи в файле .env</p>
+          <label>
+            API Secret
+            <input type="password" name="api_secret" required />
+          </label>
+          <label>
+            Bybit URL
+            <select name="base_url">
+              <option value="https://api.bybit.com">Mainnet (реальный)</option>
+              <option value="https://api-testnet.bybit.com">Testnet</option>
+            </select>
+          </label>
+          <button type="submit">Сохранить и войти</button>
+        </form>
+        <p class="hint">Каждый пользователь вводит свои ключи. Данные аккаунтов разделены.</p>
       </section>
 
-      <section class="card">
-        <h2>Таблица сделок</h2>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Токен</th>
-                <th>Статус</th>
-                <th>Кол-во</th>
-                <th>Вход</th>
-                <th>Выход</th>
-                <th>Сумма входа</th>
-                <th>Сумма выхода</th>
-                <th>Комиссия</th>
-                <th>P/L USDT</th>
-                <th>P/L %</th>
-                <th>Длительность</th>
-                <th>Источник</th>
-                <th>Действие</th>
-              </tr>
-            </thead>
-            <tbody id="trades-body"></tbody>
-          </table>
-        </div>
+      <section class="card profile-row hidden" id="profile-card">
+        <div id="profile-info"></div>
+        <button id="change-keys-btn">Сменить ключи</button>
       </section>
+
+      <div id="app-sections" class="hidden">
+        <section class="card stats-grid" id="stats"></section>
+
+        <section class="card">
+          <h2>Синхронизация с Bybit</h2>
+          <div class="sync-row">
+            <label>
+              За сколько дней подтянуть сделки
+              <input type="number" id="sync-days" value="7" min="1" max="30" />
+            </label>
+            <button id="sync-btn">Синхронизировать</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Таблица сделок</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Токен</th>
+                  <th>Статус</th>
+                  <th>Кол-во</th>
+                  <th>Вход</th>
+                  <th>Выход</th>
+                  <th>Сумма входа</th>
+                  <th>Сумма выхода</th>
+                  <th>Комиссия</th>
+                  <th>P/L USDT</th>
+                  <th>P/L %</th>
+                  <th>Длительность</th>
+                  <th>Источник</th>
+                  <th>Действие</th>
+                </tr>
+              </thead>
+              <tbody id="trades-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </main>
 
     <script src="/app.js"></script>

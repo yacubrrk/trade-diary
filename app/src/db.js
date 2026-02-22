@@ -16,8 +16,19 @@ async function getDb() {
     });
 
     await db.exec(`
+      CREATE TABLE IF NOT EXISTS profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        public_id TEXT NOT NULL UNIQUE,
+        api_key TEXT NOT NULL UNIQUE,
+        api_secret TEXT NOT NULL,
+        base_url TEXT NOT NULL,
+        recv_window INTEGER NOT NULL DEFAULT 5000,
+        created_at INTEGER NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS trades (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_profile_id INTEGER NOT NULL DEFAULT 0,
         symbol TEXT NOT NULL,
         entry_time INTEGER NOT NULL,
         exit_time INTEGER,
@@ -38,10 +49,19 @@ async function getDb() {
         created_at INTEGER NOT NULL
       );
 
+      CREATE INDEX IF NOT EXISTS idx_profiles_public_id ON profiles(public_id);
       DROP INDEX IF EXISTS idx_trades_buy_exec_id;
       CREATE INDEX IF NOT EXISTS idx_trades_buy_exec_id ON trades(buy_exec_id);
       CREATE INDEX IF NOT EXISTS idx_trades_symbol_status ON trades(symbol, status);
+      CREATE INDEX IF NOT EXISTS idx_trades_owner_time ON trades(owner_profile_id, entry_time DESC);
     `);
+
+    const tradeColumns = await db.all(`PRAGMA table_info(trades)`);
+    const hasOwnerProfileId = tradeColumns.some((c) => c.name === 'owner_profile_id');
+    if (!hasOwnerProfileId) {
+      await db.exec(`ALTER TABLE trades ADD COLUMN owner_profile_id INTEGER NOT NULL DEFAULT 0`);
+      await db.exec(`CREATE INDEX IF NOT EXISTS idx_trades_owner_time ON trades(owner_profile_id, entry_time DESC)`);
+    }
   }
 
   return db;
