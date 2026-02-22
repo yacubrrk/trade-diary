@@ -23,6 +23,7 @@ async function getDb() {
         api_secret TEXT NOT NULL,
         base_url TEXT NOT NULL,
         recv_window INTEGER NOT NULL DEFAULT 5000,
+        last_sync_at INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL
       );
 
@@ -61,6 +62,12 @@ async function getDb() {
     if (!hasOwnerProfileId) {
       await db.exec(`ALTER TABLE trades ADD COLUMN owner_profile_id INTEGER NOT NULL DEFAULT 0`);
       await db.exec(`CREATE INDEX IF NOT EXISTS idx_trades_owner_time ON trades(owner_profile_id, entry_time DESC)`);
+    }
+
+    const profileColumns = await db.all(`PRAGMA table_info(profiles)`);
+    const hasLastSyncAt = profileColumns.some((c) => c.name === 'last_sync_at');
+    if (!hasLastSyncAt) {
+      await db.exec(`ALTER TABLE profiles ADD COLUMN last_sync_at INTEGER NOT NULL DEFAULT 0`);
     }
   }
 

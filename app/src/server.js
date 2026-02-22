@@ -26,6 +26,7 @@ const DUST_QTY = 0.000001;
 const AUTO_SYNC_ENABLED = String(process.env.AUTO_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
 const AUTO_SYNC_INTERVAL_MINUTES = Math.max(5, Number(process.env.AUTO_SYNC_INTERVAL_MINUTES || 30));
 const AUTO_SYNC_DAYS = Math.max(1, Math.min(7, Number(process.env.AUTO_SYNC_DAYS || 2)));
+const PROFILE_SYNC_MIN_GAP_MS = Math.max(60, Number(process.env.PROFILE_SYNC_MIN_GAP_SECONDS || 120)) * 1000;
 
 function buildClosedMetrics({ qty, entryPrice, exitPrice, entryCommission, exitCommission, entryTime, exitTime }) {
   const invested = qty * entryPrice;
@@ -398,6 +399,7 @@ async function syncBybitForProfile(db, profile, days) {
   }
 
   const dust_closed = await closeDustOpenTrades(db, profile.id);
+  await db.run('UPDATE profiles SET last_sync_at = ? WHERE id = ?', [Date.now(), profile.id]);
 
   return {
     synced_days: safeDays,
@@ -407,6 +409,15 @@ async function syncBybitForProfile(db, profile, days) {
     unmatched_sell_qty: roundQty(unmatchedSellQty),
     dust_closed,
   };
+}
+
+async function syncBybitForProfileIfStale(db, profile, days = AUTO_SYNC_DAYS) {
+  const lastSyncAt = Number(profile.last_sync_at || 0);
+  const now = Date.now();
+  if (now - lastSyncAt < PROFILE_SYNC_MIN_GAP_MS) {
+    return { skipped: true };
+  }
+  return syncBybitForProfile(db, profile, days);
 }
 
 let autoSyncRunning = false;
@@ -454,6 +465,10 @@ app.post('/api/auth/register', async (req, res) => {
         [apiSecret, baseUrl, recvWindow, existing.id]
       );
       setAuthCookie(res, existing.public_id);
+      const refreshed = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [existing.id]);
+      syncBybitForProfileIfStale(db, refreshed, 7).catch((err) =>
+        console.error(`[auth-sync] profile ${existing.id} failed: ${err.message}`)
+      );
 
       return res.json({
         token: existing.public_id,
@@ -469,11 +484,15 @@ app.post('/api/auth/register', async (req, res) => {
     const now = Date.now();
 
     const result = await db.run(
-      `INSERT INTO profiles (public_id, api_key, api_secret, base_url, recv_window, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO profiles (public_id, api_key, api_secret, base_url, recv_window, last_sync_at, created_at)
+       VALUES (?, ?, ?, ?, ?, 0, ?)`,
       [publicId, apiKey, apiSecret, baseUrl, recvWindow, now]
     );
     setAuthCookie(res, publicId);
+    const createdProfile = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [result.lastID]);
+    syncBybitForProfileIfStale(db, createdProfile, 7).catch((err) =>
+      console.error(`[auth-sync] profile ${result.lastID} failed: ${err.message}`)
+    );
 
     res.status(201).json({
       token: publicId,
@@ -504,6 +523,11 @@ app.post('/api/auth/logout', (_req, res) => {
 
 app.get('/api/trades', requireProfile, async (req, res) => {
   const db = await getDb();
+  try {
+    await syncBybitForProfileIfStale(db, req.profile, AUTO_SYNC_DAYS);
+  } catch (err) {
+    console.error(`[on-open-sync] trades profile ${req.profile.id} failed: ${err.message}`);
+  }
   const status = (req.query.status || '').toUpperCase();
 
   const rows = status
@@ -543,6 +567,11 @@ app.put('/api/trades/:id/close', requireProfile, async (req, res) => {
 
 app.get('/api/stats', requireProfile, async (req, res) => {
   const db = await getDb();
+  try {
+    await syncBybitForProfileIfStale(db, req.profile, AUTO_SYNC_DAYS);
+  } catch (err) {
+    console.error(`[on-open-sync] stats profile ${req.profile.id} failed: ${err.message}`);
+  }
 
   const total = await db.get('SELECT COUNT(*) as cnt FROM trades WHERE owner_profile_id = ?', [req.profile.id]);
   const open = await db.get("SELECT COUNT(*) as cnt FROM trades WHERE owner_profile_id = ? AND status = 'OPEN'", [
@@ -589,6 +618,16 @@ app.post('/api/bybit/sync', requireProfile, async (req, res) => {
     const days = Math.max(1, Math.min(30, Number(req.body.days || 7)));
     const result = await syncBybitForProfile(db, req.profile, days);
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/bybit/auto-sync', requireProfile, async (req, res) => {
+  try {
+    const db = await getDb();
+    const result = await syncBybitForProfileIfStale(db, req.profile, AUTO_SYNC_DAYS);
+    res.json({ ok: true, ...(result || {}) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

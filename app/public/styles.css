@@ -70,6 +70,14 @@ h2 {
   letter-spacing: -0.02em;
 }
 
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
 .hidden {
   display: none;
 }
@@ -324,6 +332,21 @@ button.is-loading::after {
   color: var(--muted);
 }
 
+.new-trades-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #2a1b00;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+  border: 1px solid rgba(240, 141, 26, 0.2);
+  box-shadow: 0 8px 18px rgba(240, 141, 26, 0.2);
+}
+
 .table-wrap {
   overflow: auto;
   border: 1px solid var(--line);
@@ -473,6 +496,21 @@ button.is-loading::after {
   height: 42px;
 }
 
+.history-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: #fff3d0;
+  color: #6c3a00;
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .nav-btn.active {
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
   color: #2a1b00;
@@ -597,6 +635,12 @@ small {
 
   .profile-settings-btn {
     width: 40px;
+  }
+
+  .section-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
   }
 
   .stats-grid {

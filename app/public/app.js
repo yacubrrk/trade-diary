@@ -22,14 +22,22 @@ const $tabProfile = document.getElementById('tab-profile');
 const $stats = document.getElementById('stats');
 const $tbody = document.getElementById('trades-body');
 const $mobileTrades = document.getElementById('mobile-trades');
-const $syncBtn = document.getElementById('sync-btn');
-const $syncDays = document.getElementById('sync-days');
 const $tradeModal = document.getElementById('trade-modal');
 const $tradeModalTitle = document.getElementById('trade-modal-title');
 const $tradeModalGrid = document.getElementById('trade-modal-grid');
 const $tradeModalClose = document.getElementById('trade-modal-close');
+const $newTradesPill = document.getElementById('new-trades-pill');
+const $historyTabBadge = document.getElementById('history-tab-badge');
 
 let authToken = localStorage.getItem(STORAGE_TOKEN_KEY) || '';
+let lastSeenTradeId = 0;
+let latestTradeId = 0;
+let autoRefreshTimer = null;
+
+function getSeenTradeStorageKey() {
+  const tokenPart = authToken ? authToken.slice(0, 12) : 'guest';
+  return `trade_diary_last_seen_trade_id_${tokenPart}`;
+}
 
 const fmt = (n) => (n === null || n === undefined ? '-' : Number(n).toFixed(4));
 const fmtQty = (n) => (n === null || n === undefined ? '-' : Number(n).toFixed(8));
@@ -63,6 +71,8 @@ function setLoggedOutView() {
   $appSections.classList.add('hidden');
   $bottomNav.classList.add('hidden');
   $profileSettingsPanel.classList.add('hidden');
+  stopAutoRefreshLoop();
+  setNewTradesIndicator(0);
   $tbody.innerHTML = '';
   $mobileTrades.innerHTML = '';
   $stats.innerHTML = '';
@@ -74,6 +84,11 @@ function setActiveTab(tab) {
   $profileView.classList.toggle('hidden', isHistory);
   $tabHistory.classList.toggle('active', isHistory);
   $tabProfile.classList.toggle('active', !isHistory);
+  if (isHistory && latestTradeId > lastSeenTradeId) {
+    lastSeenTradeId = latestTradeId;
+    localStorage.setItem(getSeenTradeStorageKey(), String(lastSeenTradeId));
+    setNewTradesIndicator(0);
+  }
 }
 
 function setLoggedInView(profile) {
@@ -82,7 +97,9 @@ function setLoggedInView(profile) {
   $bottomNav.classList.remove('hidden');
   $profileInfo.textContent = `Аккаунт: ${profile.api_key_masked} (${profile.base_url})`;
   $profileSettingsPanel.classList.add('hidden');
+  lastSeenTradeId = Number(localStorage.getItem(getSeenTradeStorageKey()) || 0);
   setActiveTab('history');
+  startAutoRefreshLoop();
 }
 
 async function api(path, options = {}) {
@@ -143,6 +160,15 @@ async function loadTrades() {
       Number(t.pl_percent || 0) === 0;
     return !(isDustFix || isAllZero);
   });
+  latestTradeId = visibleTrades.length ? Math.max(...visibleTrades.map((t) => Number(t.id || 0))) : 0;
+  const seenKey = getSeenTradeStorageKey();
+  const hasSeenBefore = localStorage.getItem(seenKey) !== null;
+  if (!hasSeenBefore && latestTradeId > 0) {
+    lastSeenTradeId = latestTradeId;
+    localStorage.setItem(seenKey, String(lastSeenTradeId));
+  }
+  const unreadCount = visibleTrades.filter((t) => Number(t.id || 0) > lastSeenTradeId).length;
+  setNewTradesIndicator(unreadCount);
 
   $tbody.innerHTML = visibleTrades
     .map((t) => {
@@ -205,6 +231,41 @@ async function refreshAll() {
   await Promise.all([loadStats(), loadTrades()]);
 }
 
+function setNewTradesIndicator(count) {
+  const safeCount = Math.max(0, Number(count || 0));
+  if (safeCount > 0) {
+    $newTradesPill.textContent = `Новые: ${safeCount}`;
+    $newTradesPill.classList.remove('hidden');
+    $historyTabBadge.textContent = String(safeCount);
+    $historyTabBadge.classList.remove('hidden');
+  } else {
+    $newTradesPill.classList.add('hidden');
+    $historyTabBadge.classList.add('hidden');
+  }
+}
+
+async function autoSyncAndRefresh() {
+  try {
+    await api('/api/bybit/auto-sync', { method: 'POST' });
+  } catch (_err) {
+    // Ignore transient sync errors, existing saved history should remain visible.
+  }
+  await refreshAll();
+}
+
+function startAutoRefreshLoop() {
+  stopAutoRefreshLoop();
+  autoRefreshTimer = setInterval(() => {
+    autoSyncAndRefresh().catch(() => {});
+  }, 45000);
+}
+
+function stopAutoRefreshLoop() {
+  if (!autoRefreshTimer) return;
+  clearInterval(autoRefreshTimer);
+  autoRefreshTimer = null;
+}
+
 $authForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const submitBtn = $authForm.querySelector('button[type="submit"]');
@@ -250,33 +311,6 @@ $profileSettingsBtn.addEventListener('click', () => {
   $profileSettingsPanel.classList.toggle('hidden');
 });
 
-$syncBtn.addEventListener('click', async () => {
-  try {
-    $syncBtn.disabled = true;
-    $syncBtn.classList.add('is-loading');
-    $syncBtn.textContent = 'Синхронизация...';
-
-    const days = Number($syncDays.value || 7);
-    const result = await api('/api/bybit/sync', {
-      method: 'POST',
-      body: JSON.stringify({ days }),
-    });
-
-    alert(
-      `Готово. Получено исполнений: ${result.executions_received}. ` +
-        `Создано BUY: ${result.buys_created}. Закрыто SELL: ${result.sell_matches_closed}.`
-    );
-
-    await refreshAll();
-  } catch (err) {
-    alert(err.message);
-  } finally {
-    $syncBtn.disabled = false;
-    $syncBtn.classList.remove('is-loading');
-    $syncBtn.textContent = 'Синхронизировать';
-  }
-});
-
 function openTradeModal(t) {
   const plClass = Number(t.pl_usdt) >= 0 ? 'good' : 'bad';
   $tradeModalTitle.textContent = `${t.symbol} #${t.id}`;
@@ -314,7 +348,7 @@ async function bootstrap() {
   try {
     const profile = await api('/api/auth/me');
     setLoggedInView(profile);
-    await refreshAll();
+    await autoSyncAndRefresh();
   } catch (_err) {
     authToken = '';
     localStorage.removeItem(STORAGE_TOKEN_KEY);

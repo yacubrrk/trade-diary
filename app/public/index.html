@@ -39,18 +39,10 @@
           <section class="card stats-grid" id="stats"></section>
 
           <section class="card">
-            <h2>Синхронизация с Bybit</h2>
-            <div class="sync-row">
-              <label>
-                За сколько дней подтянуть сделки
-                <input type="number" id="sync-days" value="7" min="1" max="30" />
-              </label>
-              <button id="sync-btn">Синхронизировать</button>
+            <div class="section-head">
+              <h2>Таблица сделок</h2>
+              <span id="new-trades-pill" class="new-trades-pill hidden">Новые: 0</span>
             </div>
-          </section>
-
-          <section class="card">
-            <h2>Таблица сделок</h2>
             <div class="mobile-trades hidden" id="mobile-trades"></div>
             <div class="table-wrap">
               <table>
@@ -108,7 +100,9 @@
     </div>
 
     <nav class="bottom-nav hidden" id="bottom-nav">
-      <button class="nav-btn active" id="tab-history" type="button">История</button>
+      <button class="nav-btn active" id="tab-history" type="button">
+        История <span id="history-tab-badge" class="history-tab-badge hidden">0</span>
+      </button>
       <button class="nav-btn" id="tab-profile" type="button">Профиль</button>
     </nav>
 
