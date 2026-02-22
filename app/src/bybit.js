@@ -47,9 +47,16 @@ async function fetchBybitExecutions({
     },
   });
 
-  const body = await res.json();
-  if (!res.ok || body.retCode !== 0) {
-    const message = body.retMsg || `HTTP ${res.status}`;
+  const rawText = await res.text();
+  let body = null;
+  try {
+    body = rawText ? JSON.parse(rawText) : null;
+  } catch (_err) {
+    body = null;
+  }
+
+  if (!res.ok || !body || body.retCode !== 0) {
+    const message = (body && body.retMsg) || (rawText ? rawText.slice(0, 200) : `HTTP ${res.status}`);
     throw new Error(`Bybit error: ${message}`);
   }
 
