@@ -35,7 +35,6 @@ const DEFAULT_BASE_URL = {
 const AUTO_SYNC_ENABLED = String(process.env.AUTO_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
 const AUTO_SYNC_INTERVAL_MINUTES = Math.max(5, Number(process.env.AUTO_SYNC_INTERVAL_MINUTES || 30));
 const PROFILE_SYNC_MIN_GAP_MS = Math.max(60, Number(process.env.PROFILE_SYNC_MIN_GAP_SECONDS || 120)) * 1000;
-const activeFullHistorySyncs = new Set();
 
 function buildClosedMetrics({ qty, entryPrice, exitPrice, entryCommission, exitCommission, entryTime, exitTime }) {
   const invested = qty * entryPrice;
@@ -401,22 +400,14 @@ function normalizeOkxExecutions(fills) {
 
   for (const raw of fills || []) {
     const side = String(raw.side || '').toUpperCase();
-    const instId = String(raw.instId || '').toUpperCase();
-    const symbol = instId.replace('-', '');
-    const [baseCcy = '', quoteCcy = ''] = instId.split('-');
+    const symbol = String(raw.instId || '').toUpperCase().replace('-', '');
+    const qty = toNum(raw.fillSz);
     const price = toNum(raw.fillPx);
-    const rawQty = toNum(raw.fillSz);
-    const tgtCcy = String(raw.tgtCcy || '').toLowerCase();
-    let qty = rawQty;
-    if (side === 'BUY' && tgtCcy === 'quote_ccy' && price > 0) {
-      qty = rawQty / price;
-    }
     const fee = Math.abs(toNum(raw.fee));
     const execTime = toNum(raw.fillTime);
     const orderId = String(raw.ordId || '').trim();
     const execId = String(raw.tradeId || raw.billId || '').trim();
 
-    if (quoteCcy && !['USDT', 'USDC'].includes(quoteCcy)) continue;
     if (!symbol || !side || qty <= 0 || price <= 0 || execTime <= 0) continue;
 
     const groupKey = orderId ? `${symbol}|${side}|${orderId}` : `${symbol}|${side}|${execId || execTime}`;
@@ -470,7 +461,6 @@ async function syncBybitForProfile(db, profile, options = {}) {
   const baseUrl = profile.base_url || DEFAULT_BASE_URL[EXCHANGES.BYBIT];
 
   const fullHistory = Boolean(options.fullHistory);
-  const markHistorySynced = fullHistory || Boolean(options.markHistorySynced);
   const executions = fullHistory
     ? await fetchBybitExecutionsBackfill({
         apiKey,
@@ -559,7 +549,7 @@ async function syncBybitForProfile(db, profile, options = {}) {
   const dust_closed = await closeDustOpenTrades(db, profile.id);
   await db.run('UPDATE profiles SET last_sync_at = ?, history_synced_once = CASE WHEN ? THEN 1 ELSE history_synced_once END WHERE id = ?', [
     Date.now(),
-    markHistorySynced ? 1 : 0,
+    fullHistory ? 1 : 0,
     profile.id,
   ]);
 
@@ -583,7 +573,6 @@ async function syncOkxForProfile(db, profile, options = {}) {
   }
 
   const fullHistory = Boolean(options.fullHistory);
-  const markHistorySynced = fullHistory || Boolean(options.markHistorySynced);
   const fills = fullHistory
     ? await fetchOkxSpotFillsBackfill({
         apiKey,
@@ -668,7 +657,7 @@ async function syncOkxForProfile(db, profile, options = {}) {
   const dust_closed = await closeDustOpenTrades(db, profile.id);
   await db.run('UPDATE profiles SET last_sync_at = ?, history_synced_once = CASE WHEN ? THEN 1 ELSE history_synced_once END WHERE id = ?', [
     Date.now(),
-    markHistorySynced ? 1 : 0,
+    fullHistory ? 1 : 0,
     profile.id,
   ]);
 
@@ -693,23 +682,7 @@ async function syncForProfile(db, profile, options = {}) {
 async function syncForProfileIfStale(db, profile) {
   const historySynced = Number(profile.history_synced_once || 0) === 1;
   if (!historySynced) {
-    const quick = await syncForProfile(db, profile, { fullHistory: false, markHistorySynced: false });
-    const profileId = Number(profile.id || 0);
-    if (profileId > 0 && !activeFullHistorySyncs.has(profileId)) {
-      activeFullHistorySyncs.add(profileId);
-      (async () => {
-        try {
-          const fresh = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [profileId]);
-          if (!fresh) return;
-          await syncForProfile(db, fresh, { fullHistory: true, markHistorySynced: true });
-        } catch (err) {
-          console.error(`[full-history-sync] profile ${profileId} failed: ${err.message}`);
-        } finally {
-          activeFullHistorySyncs.delete(profileId);
-        }
-      })();
-    }
-    return { ...(quick || {}), full_history_started: true };
+    return syncForProfile(db, profile, { fullHistory: true });
   }
   const lastSyncAt = Number(profile.last_sync_at || 0);
   const now = Date.now();
