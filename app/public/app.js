@@ -491,7 +491,7 @@ $authForm.addEventListener('submit', async (e) => {
       exchange: normalizeExchange($authForm.elements.exchange.value),
       api_key: $authForm.elements.api_key.value.trim(),
       api_secret: $authForm.elements.api_secret.value.trim(),
-      api_passphrase: $authForm.elements.api_passphrase.value.trim() || undefined,
+      api_passphrase: String($authForm.elements.api_passphrase.value || '') || undefined,
       tg_user_id: telegramUserId || undefined,
     };
 

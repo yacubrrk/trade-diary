@@ -582,7 +582,7 @@ async function syncBybitForProfile(db, profile, days) {
 async function syncOkxForProfile(db, profile, days) {
   const apiKey = profile.api_key;
   const apiSecret = profile.api_secret;
-  const apiPassphrase = String(profile.api_passphrase || '').trim();
+  const apiPassphrase = String(profile.api_passphrase || '');
   const baseUrl = profile.base_url || DEFAULT_BASE_URL[EXCHANGES.OKX];
   if (!apiPassphrase) {
     throw new Error('api_passphrase is required for OKX profile');
@@ -793,7 +793,7 @@ app.post('/api/auth/register', async (req, res) => {
     const exchange = normalizeExchange(req.body.exchange);
     const apiKey = String(req.body.api_key || '').trim();
     const apiSecret = String(req.body.api_secret || '').trim();
-    const apiPassphrase = String(req.body.api_passphrase || '').trim();
+    const apiPassphrase = String(req.body.api_passphrase || '');
     const profileName = String(req.body.profile_name || '').trim();
     const baseUrl = String(req.body.base_url || DEFAULT_BASE_URL[exchange]).trim();
     const recvWindow = Math.max(1000, Math.min(15000, Number(req.body.recv_window || 5000)));
