@@ -407,14 +407,9 @@ function normalizeOkxExecutions(fills) {
     const [baseCcy = '', quoteCcy = ''] = instId.split('-');
     const rawQty = toNum(raw.fillSz);
     const price = toNum(raw.fillPx);
-    const fillCcy = String(raw.fillCcy || '').toUpperCase();
-    const tgtCcy = String(raw.tgtCcy || '').toLowerCase();
     const quoteCcyUpper = quoteCcy.toUpperCase();
     const baseCcyUpper = baseCcy.toUpperCase();
-    let qty = rawQty;
-    if ((fillCcy === quoteCcyUpper || (side === 'BUY' && tgtCcy === 'quote_ccy')) && price > 0) {
-      qty = rawQty / price;
-    }
+    const qty = rawQty;
     const feeRaw = toNum(raw.fee);
     const feeCcy = String(raw.feeCcy || raw.fillFeeCcy || '').toUpperCase();
     const quoteValue = qty * price;
@@ -424,16 +419,6 @@ function normalizeOkxExecutions(fills) {
         fee = feeRaw;
       } else if (feeCcy === baseCcyUpper && price > 0) {
         fee = feeRaw * price;
-      } else if (!feeCcy) {
-        // Heuristic fallback when OKX omits fee currency on some fills.
-        const absFee = Math.abs(feeRaw);
-        if (absFee <= Math.abs(qty) * 0.02 && price > 0) {
-          fee = feeRaw * price;
-        } else if (absFee <= Math.abs(quoteValue) * 0.02) {
-          fee = feeRaw;
-        } else {
-          fee = 0;
-        }
       }
       // Sanity guard: ignore obviously broken fee values (>2% notional for spot).
       const maxReasonableFee = Math.abs(quoteValue) * 0.02;
@@ -595,6 +580,20 @@ async function syncOkxForProfile(db, profile, days) {
   const baseUrl = profile.base_url || DEFAULT_BASE_URL[EXCHANGES.OKX];
   if (!apiPassphrase) {
     throw new Error('api_passphrase is required for OKX profile');
+  }
+
+  const suspiciousRow = await db.get(
+    `SELECT COUNT(*) as cnt
+     FROM trades
+     WHERE owner_profile_id = ?
+       AND source = 'okx'
+       AND status = 'CLOSED'
+       AND invested_usdt > 0
+       AND (commission_usdt > invested_usdt * 0.05 OR ABS(pl_usdt) > invested_usdt * 2)`,
+    [profile.id]
+  );
+  if (Number(suspiciousRow?.cnt || 0) > 0) {
+    await db.run(`DELETE FROM trades WHERE owner_profile_id = ? AND source = 'okx'`, [profile.id]);
   }
 
   const safeDays = Math.max(1, Math.min(90, Number(days || OKX_SYNC_DAYS)));

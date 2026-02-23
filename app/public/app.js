@@ -134,7 +134,7 @@ function setLoggedInView(profile) {
   currentProfileName = String(profile.profile_name || '').trim();
   $profileName.textContent = currentProfileName || 'Профиль без имени';
   $profileInfo.textContent = `Биржа: ${currentExchange} (${profile.base_url})`;
-  $inlineProfileNameInput.value = currentProfileName;
+  $inlineProfileNameInput.value = '';
   $inlineProfileNameEditor.classList.add('hidden');
   $profileSettingsPanel.classList.add('hidden');
   lastSeenTradeId = Number(profile.last_read_trade_id || 0);
@@ -447,9 +447,8 @@ function stopAutoRefreshLoop() {
 function showInlineProfileEditor(show) {
   $inlineProfileNameEditor.classList.toggle('hidden', !show);
   if (show) {
-    $inlineProfileNameInput.value = currentProfileName;
+    $inlineProfileNameInput.value = '';
     $inlineProfileNameInput.focus();
-    $inlineProfileNameInput.select();
   }
 }
 
