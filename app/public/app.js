@@ -538,7 +538,7 @@ function startAutoRefreshLoop() {
   stopAutoRefreshLoop();
   autoRefreshTimer = setInterval(() => {
     autoSyncAndRefresh().catch(() => {});
-  }, 45000);
+  }, 15000);
 }
 
 function stopAutoRefreshLoop() {
