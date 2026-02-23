@@ -23,6 +23,7 @@ const $profileSettingsBtn = document.getElementById('profile-settings-btn');
 const $profileSettingsPanel = document.getElementById('profile-settings-panel');
 const $profileSwitchSelect = document.getElementById('profile-switch-select');
 const $switchProfileBtn = document.getElementById('switch-profile-btn');
+const $addAccountBtn = document.getElementById('add-account-btn');
 const $editProfileNameBtn = document.getElementById('edit-profile-name-btn');
 const $inlineProfileNameEditor = document.getElementById('inline-profile-name-editor');
 const $inlineProfileNameInput = document.getElementById('inline-profile-name-input');
@@ -519,6 +520,14 @@ $changeKeysBtn.addEventListener('click', () => {
   authToken = '';
   localStorage.removeItem(STORAGE_TOKEN_KEY);
   setLoggedOutView();
+});
+
+$addAccountBtn.addEventListener('click', () => {
+  // Keep current profile intact on backend, just return user to auth form to add second profile.
+  authToken = '';
+  localStorage.removeItem(STORAGE_TOKEN_KEY);
+  setLoggedOutView();
+  $profileSettingsPanel.classList.add('hidden');
 });
 
 $profileSettingsBtn.addEventListener('click', () => {
