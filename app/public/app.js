@@ -213,7 +213,15 @@ async function loadStats() {
 
 async function loadTrades() {
   setSyncStatus(true, 'Синхронизируем сделки, это может занять до 1-2 минут...');
-  const trades = await api('/api/trades');
+  let trades = [];
+  try {
+    trades = await api('/api/trades');
+  } catch (err) {
+    $tbody.innerHTML = `<tr><td colspan="13">${err.message || 'Ошибка загрузки сделок'}</td></tr>`;
+    $mobileTrades.innerHTML = `<div class="hint">${err.message || 'Ошибка загрузки сделок'}</div>`;
+    setSyncStatus(false);
+    return;
+  }
   const visibleTrades = trades.filter((t) => {
     const isDustFix = String(t.source || '').toLowerCase() === 'bybit_dust_fix';
     const isAllZero =
@@ -513,7 +521,7 @@ function markAllTradesAsRead() {
 
 async function autoSyncAndRefresh() {
   try {
-    await api('/api/bybit/auto-sync', { method: 'POST' });
+    await api('/api/sync/auto', { method: 'POST' });
   } catch (_err) {
     // Ignore transient sync errors, existing saved history should remain visible.
   }

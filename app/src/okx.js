@@ -154,6 +154,8 @@ async function fetchOkxSpotFillsBackfill({
   baseUrl,
   lookbackDays = 3650,
   windowDays = 90,
+  stopOnFirstNonEmpty = false,
+  maxWindows = 10000,
 }) {
   const all = [];
 
@@ -172,8 +174,11 @@ async function fetchOkxSpotFillsBackfill({
   const safeLookbackDays = Math.max(safeWindowDays, Number(lookbackDays || 3650));
   const stepMs = safeWindowDays * 24 * 60 * 60 * 1000;
   const startBoundary = now - safeLookbackDays * 24 * 60 * 60 * 1000;
+  const safeMaxWindows = Math.max(1, Number(maxWindows || 1));
+  let windowsCount = 0;
 
   for (let endTime = now; endTime > startBoundary; endTime -= stepMs) {
+    if (windowsCount >= safeMaxWindows) break;
     const beginTime = Math.max(startBoundary, endTime - stepMs);
     try {
       const archive = await fetchOkxSpotFillsArchive({
@@ -186,6 +191,8 @@ async function fetchOkxSpotFillsBackfill({
         limit: 100,
       });
       all.push(...archive);
+      windowsCount += 1;
+      if (stopOnFirstNonEmpty && archive.length > 0) break;
     } catch (_err) {
       // Some accounts/exchanges can reject archive endpoint; keep recent history as fallback.
       break;

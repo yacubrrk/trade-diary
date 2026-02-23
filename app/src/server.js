@@ -487,12 +487,12 @@ async function syncBybitForProfile(db, profile, options = {}) {
         apiSecret,
         baseUrl,
         recvWindow,
-        lookbackDays: 365,
+        lookbackDays: 3650,
         windowDays: 7,
         pageLimit: 200,
-        maxPagesPerWindow: 10,
+        maxPagesPerWindow: 1,
         stopOnFirstNonEmpty: true,
-        maxWindows: 60,
+        maxWindows: 520,
       });
 
   const sorted = normalizeExecutions(executions);
@@ -595,13 +595,15 @@ async function syncOkxForProfile(db, profile, options = {}) {
         lookbackDays: 3650,
         windowDays: 90,
       })
-    : await fetchOkxSpotFillsAll({
+    : await fetchOkxSpotFillsBackfill({
         apiKey,
         apiSecret,
         apiPassphrase,
         baseUrl,
-        pageLimit: 100,
-        maxPages: 40,
+        lookbackDays: 3650,
+        windowDays: 90,
+        stopOnFirstNonEmpty: true,
+        maxWindows: 40,
       });
 
   const sorted = normalizeOkxExecutions(fills);
@@ -995,12 +997,14 @@ app.get('/api/trades', requireProfile, async (req, res) => {
   const status = (req.query.status || '').toUpperCase();
   const totalRowBefore = await db.get('SELECT COUNT(*) as cnt FROM trades WHERE owner_profile_id = ?', [req.profile.id]);
   const totalBefore = Number(totalRowBefore?.cnt || 0);
+  let initialSyncError = null;
 
   if (totalBefore === 0) {
     try {
       await syncForProfile(db, req.profile, { fullHistory: false, markHistorySynced: false });
     } catch (err) {
       console.error(`[initial-sync] trades profile ${req.profile.id} failed: ${err.message}`);
+      initialSyncError = err;
     }
   } else {
     triggerProfileSync(db, req.profile.id, 'on-open-sync-trades');
@@ -1014,6 +1018,13 @@ app.get('/api/trades', requireProfile, async (req, res) => {
     : await db.all('SELECT * FROM trades WHERE owner_profile_id = ? ORDER BY entry_time DESC, id DESC', [
         req.profile.id,
       ]);
+
+  if (initialSyncError && rows.length === 0) {
+    return res.status(503).json({
+      error: `Не удалось загрузить сделки с биржи: ${initialSyncError.message}`,
+      code: 'INITIAL_SYNC_FAILED',
+    });
+  }
 
   res.json(rows);
 });
@@ -1099,6 +1110,16 @@ app.post('/api/bybit/sync', requireProfile, async (req, res) => {
 });
 
 app.post('/api/bybit/auto-sync', requireProfile, async (req, res) => {
+  try {
+    const db = await getDb();
+    const result = triggerProfileSync(db, req.profile.id, 'client-auto-sync');
+    res.json({ ok: true, ...(result || {}) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/sync/auto', requireProfile, async (req, res) => {
   try {
     const db = await getDb();
     const result = triggerProfileSync(db, req.profile.id, 'client-auto-sync');
