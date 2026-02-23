@@ -12,6 +12,8 @@ const $authForm = document.getElementById('auth-form');
 const $exchangeInput = document.getElementById('exchange-input');
 const $okxPassphraseWrap = document.getElementById('okx-passphrase-wrap');
 const $apiPassphraseInput = document.getElementById('api-passphrase-input');
+const $quickLoginCard = document.getElementById('quick-login-card');
+const $quickLoginList = document.getElementById('quick-login-list');
 const $appSections = document.getElementById('app-sections');
 const $spotView = document.getElementById('spot-view');
 const $p2pView = document.getElementById('p2p-view');
@@ -110,6 +112,7 @@ function setLoggedOutView() {
   if ($profileSwitchSelect) $profileSwitchSelect.innerHTML = '';
   currentExchange = normalizeExchange($exchangeInput?.value || 'BYBIT');
   togglePassphraseField();
+  loadQuickLoginOptions().catch(() => {});
 }
 
 function setActiveTab(tab) {
@@ -329,6 +332,76 @@ function togglePassphraseField() {
   $apiPassphraseInput.required = isOkx;
   if (!isOkx) {
     $apiPassphraseInput.value = '';
+  }
+}
+
+async function loginWithTelegramProfile({ exchange, profileId }) {
+  if (!telegramUserId) throw new Error('Telegram user not found');
+
+  const result = await api('/api/auth/telegram-login', {
+    method: 'POST',
+    body: JSON.stringify({
+      tg_user_id: telegramUserId,
+      exchange: exchange || undefined,
+      profile_id: Number(profileId || 0) || undefined,
+    }),
+  });
+
+  authToken = result.token;
+  localStorage.setItem(STORAGE_TOKEN_KEY, authToken);
+  setLoggedInView(result.profile);
+  await autoSyncAndRefresh();
+}
+
+async function loadQuickLoginOptions() {
+  if (!telegramUserId) {
+    $quickLoginCard.classList.add('hidden');
+    $quickLoginList.innerHTML = '';
+    return;
+  }
+
+  try {
+    const data = await api(`/api/auth/telegram-profiles?tg_user_id=${encodeURIComponent(telegramUserId)}`);
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    if (!rows.length) {
+      $quickLoginCard.classList.add('hidden');
+      $quickLoginList.innerHTML = '';
+      return;
+    }
+
+    $quickLoginCard.classList.remove('hidden');
+    $quickLoginList.innerHTML = rows
+      .slice(0, 2)
+      .map((p) => {
+        const exchange = normalizeExchange(p.exchange);
+        const title = p.profile_name || p.api_key_masked || `Профиль #${p.id}`;
+        return `
+          <button class="quick-login-btn" type="button" data-profile-id="${p.id}" data-exchange="${exchange}">
+            Войти в ${exchange}: ${title}
+          </button>
+        `;
+      })
+      .join('');
+
+    $quickLoginList.querySelectorAll('.quick-login-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const profileId = Number(btn.getAttribute('data-profile-id') || 0);
+        const exchange = normalizeExchange(btn.getAttribute('data-exchange') || 'BYBIT');
+        try {
+          btn.disabled = true;
+          btn.classList.add('is-loading');
+          await loginWithTelegramProfile({ exchange, profileId });
+        } catch (err) {
+          alert(err.message || 'Не удалось войти в профиль');
+        } finally {
+          btn.disabled = false;
+          btn.classList.remove('is-loading');
+        }
+      });
+    });
+  } catch (_err) {
+    $quickLoginCard.classList.add('hidden');
+    $quickLoginList.innerHTML = '';
   }
 }
 
@@ -578,21 +651,9 @@ async function bootstrap() {
     setLoggedInView(profile);
     await autoSyncAndRefresh();
   } catch (_err) {
-    try {
-      if (!telegramUserId) throw new Error('no telegram user');
-      const tgLogin = await api('/api/auth/telegram-login', {
-        method: 'POST',
-        body: JSON.stringify({ tg_user_id: telegramUserId }),
-      });
-      authToken = tgLogin.token;
-      localStorage.setItem(STORAGE_TOKEN_KEY, authToken);
-      setLoggedInView(tgLogin.profile);
-      await autoSyncAndRefresh();
-    } catch (_err2) {
-      authToken = '';
-      localStorage.removeItem(STORAGE_TOKEN_KEY);
-      setLoggedOutView();
-    }
+    authToken = '';
+    localStorage.removeItem(STORAGE_TOKEN_KEY);
+    setLoggedOutView();
   }
 }
 
