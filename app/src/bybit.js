@@ -143,6 +143,41 @@ async function fetchBybitExecutionsAll({
   return all;
 }
 
+async function fetchBybitExecutionsBackfill({
+  apiKey,
+  apiSecret,
+  baseUrl,
+  recvWindow,
+  lookbackDays = 3650,
+  windowDays = 7,
+  pageLimit = 200,
+  maxPagesPerWindow = 20,
+}) {
+  const all = [];
+  const now = Date.now();
+  const safeWindowDays = Math.max(1, Math.min(7, Number(windowDays || 7)));
+  const safeLookbackDays = Math.max(safeWindowDays, Number(lookbackDays || 3650));
+  const stepMs = safeWindowDays * 24 * 60 * 60 * 1000;
+  const startBoundary = now - safeLookbackDays * 24 * 60 * 60 * 1000;
+
+  for (let endTime = now; endTime > startBoundary; endTime -= stepMs) {
+    const startTime = Math.max(startBoundary, endTime - stepMs);
+    const batch = await fetchBybitExecutionsAll({
+      apiKey,
+      apiSecret,
+      baseUrl,
+      recvWindow,
+      startTime,
+      endTime,
+      pageLimit,
+      maxPages: maxPagesPerWindow,
+    });
+    all.push(...batch);
+  }
+
+  return all;
+}
+
 async function fetchBybitWalletBalance({ apiKey, apiSecret, baseUrl, recvWindow }) {
   const unified = await bybitRequest({
     method: 'GET',
@@ -216,6 +251,7 @@ async function fetchBybitP2POrders({
 module.exports = {
   fetchBybitExecutions,
   fetchBybitExecutionsAll,
+  fetchBybitExecutionsBackfill,
   fetchBybitWalletBalance,
   fetchBybitP2POrders,
 };
