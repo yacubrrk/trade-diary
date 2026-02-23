@@ -1,11 +1,22 @@
 const crypto = require('crypto');
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function signOkx({ timestamp, method, requestPathWithQuery, body, apiSecret }) {
   const payload = `${timestamp}${method.toUpperCase()}${requestPathWithQuery}${body || ''}`;
   return crypto.createHmac('sha256', apiSecret).update(payload).digest('base64');
 }
 
-async function okxRequest({ method, path, apiKey, apiSecret, apiPassphrase, baseUrl, query = {}, body = null }) {
+async function okxRequest({
+  method,
+  path,
+  apiKey,
+  apiSecret,
+  apiPassphrase,
+  baseUrl,
+  query = {},
+  body = null,
+  retries = 3,
+}) {
   const cleanApiKey = String(apiKey || '').trim();
   const cleanApiSecret = String(apiSecret || '').trim();
   const cleanPassphrase = String(apiPassphrase || '').trim();
@@ -28,35 +39,46 @@ async function okxRequest({ method, path, apiKey, apiSecret, apiPassphrase, base
     apiSecret: cleanApiSecret,
   });
 
-  const res = await fetch(`${cleanBaseUrl}${requestPathWithQuery}`, {
-    method,
-    headers: {
-      'OK-ACCESS-KEY': cleanApiKey,
-      'OK-ACCESS-SIGN': sign,
-      'OK-ACCESS-TIMESTAMP': timestamp,
-      'OK-ACCESS-PASSPHRASE': cleanPassphrase,
-      'Content-Type': 'application/json',
-    },
-    body: method.toUpperCase() === 'POST' ? jsonBody : undefined,
-  });
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const res = await fetch(`${cleanBaseUrl}${requestPathWithQuery}`, {
+      method,
+      headers: {
+        'OK-ACCESS-KEY': cleanApiKey,
+        'OK-ACCESS-SIGN': sign,
+        'OK-ACCESS-TIMESTAMP': timestamp,
+        'OK-ACCESS-PASSPHRASE': cleanPassphrase,
+        'Content-Type': 'application/json',
+      },
+      body: method.toUpperCase() === 'POST' ? jsonBody : undefined,
+    });
 
-  const rawText = await res.text();
-  let parsed = null;
-  try {
-    parsed = rawText ? JSON.parse(rawText) : null;
-  } catch (_err) {
-    parsed = null;
+    const rawText = await res.text();
+    let parsed = null;
+    try {
+      parsed = rawText ? JSON.parse(rawText) : null;
+    } catch (_err) {
+      parsed = null;
+    }
+
+    const rateLimited = res.status === 429 || String(parsed?.code || '') === '50011';
+    if (rateLimited && attempt < retries) {
+      const waitMs = 600 * (attempt + 1);
+      await sleep(waitMs);
+      continue;
+    }
+
+    if (!res.ok) {
+      throw new Error(`OKX error: ${rawText ? rawText.slice(0, 200) : `HTTP ${res.status}`}`);
+    }
+
+    if (parsed && String(parsed.code || '0') !== '0') {
+      throw new Error(`OKX error: ${parsed.msg || 'unknown error'}`);
+    }
+
+    return parsed || {};
   }
 
-  if (!res.ok) {
-    throw new Error(`OKX error: ${rawText ? rawText.slice(0, 200) : `HTTP ${res.status}`}`);
-  }
-
-  if (parsed && String(parsed.code || '0') !== '0') {
-    throw new Error(`OKX error: ${parsed.msg || 'unknown error'}`);
-  }
-
-  return parsed || {};
+  throw new Error('OKX error: request failed after retries');
 }
 
 async function fetchOkxSpotFills({ apiKey, apiSecret, apiPassphrase, baseUrl, beginMs, endMs, limit = 100 }) {
@@ -165,7 +187,7 @@ async function fetchOkxSpotFillsBackfill({
     apiPassphrase,
     baseUrl,
     pageLimit: 100,
-    maxPages: 400,
+    maxPages: 80,
   });
   all.push(...recent);
 
