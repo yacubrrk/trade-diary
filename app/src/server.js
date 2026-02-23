@@ -5,6 +5,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const { getDb } = require('./db');
 const { fetchBybitExecutions, fetchBybitWalletBalance, fetchBybitP2POrders } = require('./bybit');
+const { fetchOkxSpotFills, fetchOkxWalletBalance } = require('./okx');
 
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
@@ -395,6 +396,60 @@ function normalizeExecutions(executions) {
     .sort((a, b) => toNum(a.execTime) - toNum(b.execTime));
 }
 
+function normalizeOkxExecutions(fills) {
+  const groups = new Map();
+
+  for (const raw of fills || []) {
+    const side = String(raw.side || '').toUpperCase();
+    const symbol = String(raw.instId || '').toUpperCase().replace('-', '');
+    const qty = toNum(raw.fillSz);
+    const price = toNum(raw.fillPx);
+    const fee = Math.abs(toNum(raw.fee));
+    const execTime = toNum(raw.fillTime);
+    const orderId = String(raw.ordId || '').trim();
+    const execId = String(raw.tradeId || raw.billId || '').trim();
+
+    if (!symbol || !side || qty <= 0 || price <= 0 || execTime <= 0) continue;
+
+    const groupKey = orderId ? `${symbol}|${side}|${orderId}` : `${symbol}|${side}|${execId || execTime}`;
+    const quote = qty * price;
+
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        symbol,
+        side,
+        orderId,
+        execId: execId || `okx_${groupKey}`,
+        execQty: 0,
+        execFee: 0,
+        quoteSum: 0,
+        minExecTime: execTime,
+        maxExecTime: execTime,
+      });
+    }
+
+    const g = groups.get(groupKey);
+    g.execQty += qty;
+    g.execFee += fee;
+    g.quoteSum += quote;
+    if (execTime < g.minExecTime) g.minExecTime = execTime;
+    if (execTime > g.maxExecTime) g.maxExecTime = execTime;
+  }
+
+  return Array.from(groups.values())
+    .map((g) => ({
+      symbol: g.symbol,
+      side: g.side,
+      orderId: g.orderId || null,
+      execId: g.orderId || g.execId,
+      execQty: roundQty(g.execQty),
+      execFee: roundMoney(g.execFee),
+      execPrice: g.execQty > 0 ? g.quoteSum / g.execQty : 0,
+      execTime: g.side === 'BUY' ? g.minExecTime : g.maxExecTime,
+    }))
+    .sort((a, b) => toNum(a.execTime) - toNum(b.execTime));
+}
+
 async function syncBybitForProfile(db, profile, days) {
   const exchange = normalizeExchange(profile.exchange);
   if (exchange !== EXCHANGES.BYBIT) {
@@ -496,18 +551,120 @@ async function syncBybitForProfile(db, profile, days) {
   };
 }
 
-async function syncBybitForProfileIfStale(db, profile, days = AUTO_SYNC_DAYS) {
-  const exchange = normalizeExchange(profile.exchange);
-  if (exchange !== EXCHANGES.BYBIT) {
-    return { skipped: true, reason: `sync is not implemented for ${exchange}` };
+async function syncOkxForProfile(db, profile, days) {
+  const apiKey = profile.api_key;
+  const apiSecret = profile.api_secret;
+  const apiPassphrase = String(profile.api_passphrase || '').trim();
+  const baseUrl = profile.base_url || DEFAULT_BASE_URL[EXCHANGES.OKX];
+  if (!apiPassphrase) {
+    throw new Error('api_passphrase is required for OKX profile');
   }
 
+  const safeDays = Math.max(1, Math.min(30, Number(days || 7)));
+  const endTime = Date.now();
+  const startTime = endTime - safeDays * 24 * 60 * 60 * 1000;
+
+  const fills = await fetchOkxSpotFills({
+    apiKey,
+    apiSecret,
+    apiPassphrase,
+    baseUrl,
+    beginMs: startTime,
+    endMs: endTime,
+    limit: 100,
+  });
+
+  const sorted = normalizeOkxExecutions(fills);
+
+  let createdBuys = 0;
+  let closedFromSells = 0;
+  let unmatchedSellQty = 0;
+
+  for (const ex of sorted) {
+    const side = String(ex.side || '').toUpperCase();
+    const symbol = String(ex.symbol || '').toUpperCase();
+    const qty = toNum(ex.execQty);
+    const price = toNum(ex.execPrice);
+    const fee = Math.abs(toNum(ex.execFee));
+    const execId = String(ex.execId || '');
+    const execTime = toNum(ex.execTime);
+
+    if (!symbol || qty <= 0 || price <= 0 || !execTime) continue;
+
+    if (side === 'BUY') {
+      if (execId) {
+        const exists = await db.get(
+          'SELECT id FROM trades WHERE owner_profile_id = ? AND buy_exec_id = ? LIMIT 1',
+          [profile.id, execId]
+        );
+        if (exists) continue;
+      }
+
+      await db.run(
+        `INSERT INTO trades (
+          owner_profile_id,
+          symbol, entry_time, exit_time,
+          qty, remaining_qty,
+          entry_price, exit_price,
+          invested_usdt, received_usdt,
+          commission_usdt,
+          pl_usdt, pl_percent,
+          duration_minutes,
+          status, source,
+          buy_exec_id, sell_exec_id,
+          created_at
+        ) VALUES (?, ?, ?, NULL, ?, ?, ?, NULL, ?, NULL, ?, NULL, NULL, NULL, 'OPEN', 'okx', ?, NULL, ?)`,
+        [
+          profile.id,
+          symbol,
+          execTime,
+          qty,
+          qty,
+          price,
+          roundMoney(qty * price),
+          fee,
+          execId || null,
+          Date.now(),
+        ]
+      );
+      createdBuys += 1;
+    }
+
+    if (side === 'SELL') {
+      const result = await applySellExecutionFifo(db, profile.id, ex);
+      closedFromSells += result.closedCount;
+      unmatchedSellQty += toNum(result.unmatchedQty);
+    }
+  }
+
+  const dust_closed = await closeDustOpenTrades(db, profile.id);
+  await db.run('UPDATE profiles SET last_sync_at = ? WHERE id = ?', [Date.now(), profile.id]);
+
+  return {
+    synced_days: safeDays,
+    executions_received: sorted.length,
+    buys_created: createdBuys,
+    sell_matches_closed: closedFromSells,
+    unmatched_sell_qty: roundQty(unmatchedSellQty),
+    dust_closed,
+  };
+}
+
+async function syncForProfile(db, profile, days) {
+  const exchange = normalizeExchange(profile.exchange);
+  if (exchange === EXCHANGES.OKX) {
+    return syncOkxForProfile(db, profile, days);
+  }
+  return syncBybitForProfile(db, profile, days);
+}
+
+async function syncBybitForProfileIfStale(db, profile, days = AUTO_SYNC_DAYS) {
   const lastSyncAt = Number(profile.last_sync_at || 0);
   const now = Date.now();
   if (now - lastSyncAt < PROFILE_SYNC_MIN_GAP_MS) {
     return { skipped: true };
   }
-  return syncBybitForProfile(db, profile, days);
+  return syncForProfile(db, profile, days);
 }
 
 async function repairInvalidTradeTimes(db) {
@@ -531,7 +688,7 @@ async function runAutoSync() {
     const profiles = await db.all('SELECT * FROM profiles ORDER BY id ASC');
     for (const profile of profiles) {
       try {
-        await syncBybitForProfile(db, profile, AUTO_SYNC_DAYS);
+        await syncForProfile(db, profile, AUTO_SYNC_DAYS);
       } catch (err) {
         console.error(`[auto-sync] profile ${profile.id} failed: ${err.message}`);
       }
@@ -855,14 +1012,39 @@ app.post('/api/profile/name', requireProfile, async (req, res) => {
 app.get('/api/balance', requireProfile, async (req, res) => {
   try {
     const exchange = normalizeExchange(req.profile.exchange);
-    if (exchange !== EXCHANGES.BYBIT) {
+    if (exchange === EXCHANGES.OKX) {
+      const result = await fetchOkxWalletBalance({
+        apiKey: req.profile.api_key,
+        apiSecret: req.profile.api_secret,
+        apiPassphrase: req.profile.api_passphrase,
+        baseUrl: req.profile.base_url || DEFAULT_BASE_URL[EXCHANGES.OKX],
+      });
+
+      const tradingDetails = Array.isArray(result.trading?.details) ? result.trading.details : [];
+      const nonZeroTrading = tradingDetails
+        .map((d) => ({
+          coin: d.ccy,
+          wallet_balance: toNum(d.cashBal),
+          available_to_withdraw: toNum(d.availBal),
+          locked: toNum(d.frozenBal),
+          usd_value: toNum(d.eqUsd),
+        }))
+        .filter((c) => c.wallet_balance > 0 || c.locked > 0 || c.usd_value > 0)
+        .sort((a, b) => b.usd_value - a.usd_value);
+
+      const funding = (result.funding || [])
+        .map((c) => ({
+          coin: c.ccy,
+          transfer_balance: toNum(c.availBal),
+          wallet_balance: toNum(c.bal),
+        }))
+        .filter((c) => c.transfer_balance > 0 || c.wallet_balance > 0);
+
       return res.json({
         exchange,
-        supported: false,
-        message: `Balance sync for ${exchange} is not implemented yet`,
-        unified_total_usd: 0,
-        unified_coins: [],
-        fund_coins: [],
+        unified_total_usd: toNum(result.trading?.totalEq),
+        unified_coins: nonZeroTrading,
+        fund_coins: funding,
       });
     }
 
