@@ -44,6 +44,7 @@ const $tradeModalGrid = document.getElementById('trade-modal-grid');
 const $tradeModalClose = document.getElementById('trade-modal-close');
 const $newTradesPill = document.getElementById('new-trades-pill');
 const $spotTabBadge = document.getElementById('spot-tab-badge');
+const $syncStatusPill = document.getElementById('sync-status-pill');
 
 let authToken = localStorage.getItem(STORAGE_TOKEN_KEY) || '';
 let lastSeenTradeId = 0;
@@ -115,6 +116,7 @@ function setLoggedOutView() {
   currentExchange = normalizeExchange($exchangeInput?.value || 'BYBIT');
   togglePassphraseField();
   loadQuickLoginOptions().catch(() => {});
+  setSyncStatus(false);
 }
 
 function setActiveTab(tab) {
@@ -210,6 +212,7 @@ async function loadStats() {
 }
 
 async function loadTrades() {
+  setSyncStatus(true, 'Синхронизируем сделки, это может занять до 1-2 минут...');
   const trades = await api('/api/trades');
   const visibleTrades = trades.filter((t) => {
     const isDustFix = String(t.source || '').toLowerCase() === 'bybit_dust_fix';
@@ -308,10 +311,22 @@ async function loadTrades() {
       markAllTradesAsRead();
     });
   }
+
+  if (!visibleTrades.length) {
+    $tbody.innerHTML =
+      '<tr><td colspan="13">Сделки загружаются с биржи. Обычно это занимает 10-90 секунд.</td></tr>';
+    $mobileTrades.innerHTML = '<div class="hint">Сделки загружаются с биржи. Подожди немного.</div>';
+  }
+
+  setSyncStatus(false);
 }
 
 async function refreshAll() {
-  await Promise.all([loadStats(), loadTrades(), loadP2POrders(), loadProfileBalance()]);
+  try {
+    await Promise.all([loadStats(), loadTrades(), loadP2POrders(), loadProfileBalance()]);
+  } finally {
+    setSyncStatus(false);
+  }
 }
 
 function setNewTradesIndicator(count) {
@@ -325,6 +340,16 @@ function setNewTradesIndicator(count) {
     $newTradesPill.classList.add('hidden');
     $spotTabBadge.classList.add('hidden');
   }
+}
+
+function setSyncStatus(active, text = 'Синхронизируем сделки...') {
+  if (!$syncStatusPill) return;
+  if (!active) {
+    $syncStatusPill.classList.add('hidden');
+    return;
+  }
+  $syncStatusPill.textContent = text;
+  $syncStatusPill.classList.remove('hidden');
 }
 
 function togglePassphraseField() {
