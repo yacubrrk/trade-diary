@@ -78,12 +78,6 @@ h2 {
   margin-bottom: 8px;
 }
 
-.section-head-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .hidden {
   display: none;
 }
@@ -669,20 +663,6 @@ button.is-loading::after {
 }
 
 .new-trades-pill.hidden {
-  display: none;
-}
-
-.sync-status-pill {
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  background: rgba(31, 138, 90, 0.12);
-  color: #1a5e3e;
-  border: 1px solid rgba(31, 138, 90, 0.2);
-}
-
-.sync-status-pill.hidden {
   display: none;
 }
 
