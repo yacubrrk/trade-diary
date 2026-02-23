@@ -4,8 +4,8 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { getDb } = require('./db');
-const { fetchBybitExecutions, fetchBybitWalletBalance, fetchBybitP2POrders } = require('./bybit');
-const { fetchOkxSpotFills, fetchOkxWalletBalance } = require('./okx');
+const { fetchBybitExecutionsAll, fetchBybitWalletBalance, fetchBybitP2POrders } = require('./bybit');
+const { fetchOkxSpotFillsAll, fetchOkxWalletBalance } = require('./okx');
 
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
@@ -34,7 +34,6 @@ const DEFAULT_BASE_URL = {
 };
 const AUTO_SYNC_ENABLED = String(process.env.AUTO_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
 const AUTO_SYNC_INTERVAL_MINUTES = Math.max(5, Number(process.env.AUTO_SYNC_INTERVAL_MINUTES || 30));
-const AUTO_SYNC_DAYS = Math.max(1, Math.min(7, Number(process.env.AUTO_SYNC_DAYS || 2)));
 const PROFILE_SYNC_MIN_GAP_MS = Math.max(60, Number(process.env.PROFILE_SYNC_MIN_GAP_SECONDS || 120)) * 1000;
 
 function buildClosedMetrics({ qty, entryPrice, exitPrice, entryCommission, exitCommission, entryTime, exitTime }) {
@@ -450,7 +449,7 @@ function normalizeOkxExecutions(fills) {
     .sort((a, b) => toNum(a.execTime) - toNum(b.execTime));
 }
 
-async function syncBybitForProfile(db, profile, days) {
+async function syncBybitForProfile(db, profile) {
   const exchange = normalizeExchange(profile.exchange);
   if (exchange !== EXCHANGES.BYBIT) {
     return { skipped: true, reason: `sync is not implemented for ${exchange}` };
@@ -461,18 +460,13 @@ async function syncBybitForProfile(db, profile, days) {
   const recvWindow = Number(profile.recv_window || 5000);
   const baseUrl = profile.base_url || DEFAULT_BASE_URL[EXCHANGES.BYBIT];
 
-  const safeDays = Math.max(1, Math.min(30, Number(days || 7)));
-  const endTime = Date.now();
-  const startTime = endTime - safeDays * 24 * 60 * 60 * 1000;
-
-  const executions = await fetchBybitExecutions({
+  const executions = await fetchBybitExecutionsAll({
     apiKey,
     apiSecret,
     baseUrl,
     recvWindow,
-    startTime,
-    endTime,
-    limit: 200,
+    pageLimit: 200,
+    maxPages: 400,
   });
 
   const sorted = normalizeExecutions(executions);
@@ -542,7 +536,7 @@ async function syncBybitForProfile(db, profile, days) {
   await db.run('UPDATE profiles SET last_sync_at = ? WHERE id = ?', [Date.now(), profile.id]);
 
   return {
-    synced_days: safeDays,
+    sync_scope: 'full_available_history',
     executions_received: sorted.length,
     buys_created: createdBuys,
     sell_matches_closed: closedFromSells,
@@ -551,7 +545,7 @@ async function syncBybitForProfile(db, profile, days) {
   };
 }
 
-async function syncOkxForProfile(db, profile, days) {
+async function syncOkxForProfile(db, profile) {
   const apiKey = profile.api_key;
   const apiSecret = profile.api_secret;
   const apiPassphrase = String(profile.api_passphrase || '').trim();
@@ -560,18 +554,13 @@ async function syncOkxForProfile(db, profile, days) {
     throw new Error('api_passphrase is required for OKX profile');
   }
 
-  const safeDays = Math.max(1, Math.min(30, Number(days || 7)));
-  const endTime = Date.now();
-  const startTime = endTime - safeDays * 24 * 60 * 60 * 1000;
-
-  const fills = await fetchOkxSpotFills({
+  const fills = await fetchOkxSpotFillsAll({
     apiKey,
     apiSecret,
     apiPassphrase,
     baseUrl,
-    beginMs: startTime,
-    endMs: endTime,
-    limit: 100,
+    pageLimit: 100,
+    maxPages: 400,
   });
 
   const sorted = normalizeOkxExecutions(fills);
@@ -641,7 +630,7 @@ async function syncOkxForProfile(db, profile, days) {
   await db.run('UPDATE profiles SET last_sync_at = ? WHERE id = ?', [Date.now(), profile.id]);
 
   return {
-    synced_days: safeDays,
+    sync_scope: 'full_available_history',
     executions_received: sorted.length,
     buys_created: createdBuys,
     sell_matches_closed: closedFromSells,
@@ -650,21 +639,21 @@ async function syncOkxForProfile(db, profile, days) {
   };
 }
 
-async function syncForProfile(db, profile, days) {
+async function syncForProfile(db, profile) {
   const exchange = normalizeExchange(profile.exchange);
   if (exchange === EXCHANGES.OKX) {
-    return syncOkxForProfile(db, profile, days);
+    return syncOkxForProfile(db, profile);
   }
-  return syncBybitForProfile(db, profile, days);
+  return syncBybitForProfile(db, profile);
 }
 
-async function syncBybitForProfileIfStale(db, profile, days = AUTO_SYNC_DAYS) {
+async function syncForProfileIfStale(db, profile) {
   const lastSyncAt = Number(profile.last_sync_at || 0);
   const now = Date.now();
   if (now - lastSyncAt < PROFILE_SYNC_MIN_GAP_MS) {
     return { skipped: true };
   }
-  return syncForProfile(db, profile, days);
+  return syncForProfile(db, profile);
 }
 
 async function repairInvalidTradeTimes(db) {
@@ -688,7 +677,7 @@ async function runAutoSync() {
     const profiles = await db.all('SELECT * FROM profiles ORDER BY id ASC');
     for (const profile of profiles) {
       try {
-        await syncForProfile(db, profile, AUTO_SYNC_DAYS);
+        await syncForProfile(db, profile);
       } catch (err) {
         console.error(`[auto-sync] profile ${profile.id} failed: ${err.message}`);
       }
@@ -733,7 +722,7 @@ app.post('/api/auth/register', async (req, res) => {
       );
       setAuthCookie(res, existing.public_id);
       const refreshed = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [existing.id]);
-      syncBybitForProfileIfStale(db, refreshed, 7).catch((err) =>
+      syncForProfileIfStale(db, refreshed).catch((err) =>
         console.error(`[auth-sync] profile ${existing.id} failed: ${err.message}`)
       );
 
@@ -763,7 +752,7 @@ app.post('/api/auth/register', async (req, res) => {
     );
     setAuthCookie(res, publicId);
     const createdProfile = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [result.lastID]);
-    syncBybitForProfileIfStale(db, createdProfile, 7).catch((err) =>
+    syncForProfileIfStale(db, createdProfile).catch((err) =>
       console.error(`[auth-sync] profile ${result.lastID} failed: ${err.message}`)
     );
 
@@ -868,7 +857,7 @@ app.post('/api/auth/logout', (_req, res) => {
 app.get('/api/trades', requireProfile, async (req, res) => {
   const db = await getDb();
   try {
-    await syncBybitForProfileIfStale(db, req.profile, AUTO_SYNC_DAYS);
+    await syncForProfileIfStale(db, req.profile);
   } catch (err) {
     console.error(`[on-open-sync] trades profile ${req.profile.id} failed: ${err.message}`);
   }
@@ -912,7 +901,7 @@ app.put('/api/trades/:id/close', requireProfile, async (req, res) => {
 app.get('/api/stats', requireProfile, async (req, res) => {
   const db = await getDb();
   try {
-    await syncBybitForProfileIfStale(db, req.profile, AUTO_SYNC_DAYS);
+    await syncForProfileIfStale(db, req.profile);
   } catch (err) {
     console.error(`[on-open-sync] stats profile ${req.profile.id} failed: ${err.message}`);
   }
@@ -959,11 +948,7 @@ app.get('/api/stats', requireProfile, async (req, res) => {
 app.post('/api/bybit/sync', requireProfile, async (req, res) => {
   try {
     const db = await getDb();
-    if (normalizeExchange(req.profile.exchange) !== EXCHANGES.BYBIT) {
-      return res.status(400).json({ error: 'Endpoint supports only BYBIT profiles' });
-    }
-    const days = Math.max(1, Math.min(30, Number(req.body.days || 7)));
-    const result = await syncBybitForProfile(db, req.profile, days);
+    const result = await syncForProfile(db, req.profile);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -973,7 +958,7 @@ app.post('/api/bybit/sync', requireProfile, async (req, res) => {
 app.post('/api/bybit/auto-sync', requireProfile, async (req, res) => {
   try {
     const db = await getDb();
-    const result = await syncBybitForProfileIfStale(db, req.profile, AUTO_SYNC_DAYS);
+    const result = await syncForProfileIfStale(db, req.profile);
     res.json({ ok: true, ...(result || {}) });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1151,7 +1136,7 @@ app.listen(PORT, () => {
     setInterval(() => {
       runAutoSync().catch((err) => console.error(`[auto-sync] loop failed: ${err.message}`));
     }, AUTO_SYNC_INTERVAL_MINUTES * 60 * 1000);
-    console.log(`[auto-sync] enabled: every ${AUTO_SYNC_INTERVAL_MINUTES} min, days=${AUTO_SYNC_DAYS}`);
+    console.log(`[auto-sync] enabled: every ${AUTO_SYNC_INTERVAL_MINUTES} min, scope=full_available_history`);
   } else {
     console.log('[auto-sync] disabled');
   }

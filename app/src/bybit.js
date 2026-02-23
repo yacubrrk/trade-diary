@@ -100,6 +100,49 @@ async function fetchBybitExecutions({
   return body.result?.list || [];
 }
 
+async function fetchBybitExecutionsAll({
+  apiKey,
+  apiSecret,
+  baseUrl,
+  recvWindow,
+  startTime,
+  endTime,
+  pageLimit = 200,
+  maxPages = 300,
+}) {
+  const all = [];
+  let cursor = '';
+  let pages = 0;
+
+  while (pages < Math.max(1, Number(maxPages || 1))) {
+    const body = await bybitRequest({
+      method: 'GET',
+      path: '/v5/execution/list',
+      apiKey,
+      apiSecret,
+      baseUrl,
+      recvWindow,
+      query: {
+        category: 'spot',
+        limit: Math.max(1, Math.min(200, Number(pageLimit || 200))),
+        startTime: startTime || undefined,
+        endTime: endTime || undefined,
+        cursor: cursor || undefined,
+      },
+    });
+
+    const list = Array.isArray(body.result?.list) ? body.result.list : [];
+    all.push(...list);
+    pages += 1;
+
+    const nextCursor = String(body.result?.nextPageCursor || '').trim();
+    if (!nextCursor || list.length === 0 || nextCursor === cursor) break;
+    cursor = nextCursor;
+  }
+
+  return all;
+}
+
 async function fetchBybitWalletBalance({ apiKey, apiSecret, baseUrl, recvWindow }) {
   const unified = await bybitRequest({
     method: 'GET',
@@ -172,6 +215,7 @@ async function fetchBybitP2POrders({
 
 module.exports = {
   fetchBybitExecutions,
+  fetchBybitExecutionsAll,
   fetchBybitWalletBalance,
   fetchBybitP2POrders,
 };
