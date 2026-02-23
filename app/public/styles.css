@@ -305,6 +305,37 @@ button.is-loading::after {
   margin-bottom: 2px;
 }
 
+.profile-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.edit-profile-name-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  box-shadow: none;
+}
+
+.inline-profile-name-editor {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.inline-profile-name-editor input {
+  width: 100%;
+  margin: 0;
+}
+
 #profile-info {
   font-weight: 700;
 }

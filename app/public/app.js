@@ -23,8 +23,11 @@ const $profileSettingsBtn = document.getElementById('profile-settings-btn');
 const $profileSettingsPanel = document.getElementById('profile-settings-panel');
 const $profileSwitchSelect = document.getElementById('profile-switch-select');
 const $switchProfileBtn = document.getElementById('switch-profile-btn');
-const $profileNameInput = document.getElementById('profile-name-input');
-const $saveProfileNameBtn = document.getElementById('save-profile-name-btn');
+const $editProfileNameBtn = document.getElementById('edit-profile-name-btn');
+const $inlineProfileNameEditor = document.getElementById('inline-profile-name-editor');
+const $inlineProfileNameInput = document.getElementById('inline-profile-name-input');
+const $inlineProfileNameSaveBtn = document.getElementById('inline-profile-name-save-btn');
+const $inlineProfileNameCancelBtn = document.getElementById('inline-profile-name-cancel-btn');
 const $bottomNav = document.getElementById('bottom-nav');
 const $tabSpot = document.getElementById('tab-spot');
 const $tabP2P = document.getElementById('tab-p2p');
@@ -110,6 +113,7 @@ function setLoggedOutView() {
   if ($profileSwitchSelect) $profileSwitchSelect.innerHTML = '';
   currentExchange = normalizeExchange($exchangeInput?.value || 'BYBIT');
   togglePassphraseField();
+  $inlineProfileNameEditor.classList.add('hidden');
 }
 
 function setActiveTab(tab) {
@@ -130,7 +134,8 @@ function setLoggedInView(profile) {
   currentProfileName = String(profile.profile_name || '').trim();
   $profileName.textContent = currentProfileName || 'Профиль без имени';
   $profileInfo.textContent = `Биржа: ${currentExchange} (${profile.base_url})`;
-  $profileNameInput.value = currentProfileName;
+  $inlineProfileNameInput.value = currentProfileName;
+  $inlineProfileNameEditor.classList.add('hidden');
   $profileSettingsPanel.classList.add('hidden');
   lastSeenTradeId = Number(profile.last_read_trade_id || 0);
   setActiveTab('spot');
@@ -439,6 +444,40 @@ function stopAutoRefreshLoop() {
   autoRefreshTimer = null;
 }
 
+function showInlineProfileEditor(show) {
+  $inlineProfileNameEditor.classList.toggle('hidden', !show);
+  if (show) {
+    $inlineProfileNameInput.value = currentProfileName;
+    $inlineProfileNameInput.focus();
+    $inlineProfileNameInput.select();
+  }
+}
+
+async function saveProfileNameInline() {
+  const name = String($inlineProfileNameInput.value || '').trim();
+  if (!name) {
+    alert('Введите имя профиля');
+    return;
+  }
+  try {
+    $inlineProfileNameSaveBtn.disabled = true;
+    $inlineProfileNameSaveBtn.classList.add('is-loading');
+    const result = await api('/api/profile/name', {
+      method: 'POST',
+      body: JSON.stringify({ profile_name: name }),
+    });
+    currentProfileName = String(result.profile_name || name);
+    $profileName.textContent = currentProfileName;
+    showInlineProfileEditor(false);
+    await loadProfileSwitchOptions();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    $inlineProfileNameSaveBtn.disabled = false;
+    $inlineProfileNameSaveBtn.classList.remove('is-loading');
+  }
+}
+
 $authForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const submitBtn = $authForm.querySelector('button[type="submit"]');
@@ -513,27 +552,26 @@ $switchProfileBtn.addEventListener('click', async () => {
   }
 });
 
-$saveProfileNameBtn.addEventListener('click', async () => {
-  const name = String($profileNameInput.value || '').trim();
-  if (!name) {
-    alert('Введите имя профиля');
-    return;
+$editProfileNameBtn.addEventListener('click', () => {
+  showInlineProfileEditor($inlineProfileNameEditor.classList.contains('hidden'));
+});
+
+$inlineProfileNameSaveBtn.addEventListener('click', () => {
+  saveProfileNameInline().catch((err) => alert(err.message));
+});
+
+$inlineProfileNameCancelBtn.addEventListener('click', () => {
+  showInlineProfileEditor(false);
+});
+
+$inlineProfileNameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    saveProfileNameInline().catch((err) => alert(err.message));
   }
-  try {
-    $saveProfileNameBtn.disabled = true;
-    $saveProfileNameBtn.classList.add('is-loading');
-    const result = await api('/api/profile/name', {
-      method: 'POST',
-      body: JSON.stringify({ profile_name: name }),
-    });
-    currentProfileName = String(result.profile_name || name);
-    $profileName.textContent = currentProfileName;
-    await loadProfileSwitchOptions();
-  } catch (err) {
-    alert(err.message);
-  } finally {
-    $saveProfileNameBtn.disabled = false;
-    $saveProfileNameBtn.classList.remove('is-loading');
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    showInlineProfileEditor(false);
   }
 });
 

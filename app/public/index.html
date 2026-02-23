@@ -100,7 +100,23 @@
                 &#9881;
               </button>
             </div>
-            <div id="profile-name" class="profile-name-text"></div>
+            <div class="profile-name-row">
+              <div id="profile-name" class="profile-name-text"></div>
+              <button
+                id="edit-profile-name-btn"
+                class="edit-profile-name-btn"
+                type="button"
+                aria-label="Редактировать имя профиля"
+                title="Редактировать имя"
+              >
+                &#9998;
+              </button>
+            </div>
+            <div id="inline-profile-name-editor" class="inline-profile-name-editor hidden">
+              <input id="inline-profile-name-input" type="text" maxlength="40" placeholder="Например: Yakub Main" />
+              <button id="inline-profile-name-save-btn" type="button">Сохранить</button>
+              <button id="inline-profile-name-cancel-btn" type="button">Отмена</button>
+            </div>
             <div id="profile-info" class="profile-info-text"></div>
             <div class="profile-balance-card">
               <div class="profile-balance-title">Баланс (USD)</div>
@@ -116,11 +132,7 @@
                 <select id="profile-switch-select"></select>
                 <button id="switch-profile-btn" type="button">Переключить профиль</button>
               </div>
-              <label class="settings-label" for="profile-name-input">Имя профиля</label>
-              <div class="profile-settings-actions">
-                <input id="profile-name-input" type="text" maxlength="40" placeholder="Например: Yakub Main" />
-                <button id="save-profile-name-btn" type="button">Сохранить имя</button>
-              </div>
+              <p class="hint">Имя профиля можно изменить по кнопке с карандашом рядом с именем.</p>
               <div class="profile-settings-actions">
                 <button id="change-keys-btn" type="button">Сменить ключи</button>
               </div>
