@@ -793,69 +793,22 @@ app.get('/api/auth/me', requireProfile, async (req, res) => {
   res.json(mapProfileResponse(req.profile));
 });
 
-app.get('/api/auth/telegram-profiles', async (req, res) => {
-  try {
-    const db = await getDb();
-    const tgUserId = String(req.query.tg_user_id || '').trim();
-    if (!tgUserId) {
-      return res.status(400).json({ error: 'tg_user_id is required' });
-    }
-
-    const rows = await db.all(
-      `SELECT *
-       FROM profiles
-       WHERE tg_user_id = ?
-       ORDER BY last_selected_at DESC, created_at DESC, id DESC`,
-      [tgUserId]
-    );
-
-    return res.json({
-      rows: rows.map((p) => mapProfileResponse(p)),
-    });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
 app.post('/api/auth/telegram-login', async (req, res) => {
   try {
     const db = await getDb();
     const tgUserId = String(req.body.tg_user_id || '').trim();
-    const exchange = String(req.body.exchange || '').trim().toUpperCase();
-    const profileId = Number(req.body.profile_id || 0);
     if (!tgUserId) {
       return res.status(400).json({ error: 'tg_user_id is required' });
     }
 
-    let profile = null;
-    if (Number.isFinite(profileId) && profileId > 0) {
-      profile = await db.get(
-        `SELECT *
-         FROM profiles
-         WHERE id = ? AND tg_user_id = ?
-         LIMIT 1`,
-        [profileId, tgUserId]
-      );
-    } else if (exchange === EXCHANGES.BYBIT || exchange === EXCHANGES.OKX) {
-      profile = await db.get(
-        `SELECT *
-         FROM profiles
-         WHERE tg_user_id = ? AND exchange = ?
-         ORDER BY last_selected_at DESC, created_at DESC, id DESC
-         LIMIT 1`,
-        [tgUserId, exchange]
-      );
-    } else {
-      profile = await db.get(
-        `SELECT *
-         FROM profiles
-         WHERE tg_user_id = ?
-         ORDER BY last_selected_at DESC, created_at DESC, id DESC
-         LIMIT 1`,
-        [tgUserId]
-      );
-    }
-
+    const profile = await db.get(
+      `SELECT *
+       FROM profiles
+       WHERE tg_user_id = ?
+       ORDER BY last_selected_at DESC, created_at DESC, id DESC
+       LIMIT 1`,
+      [tgUserId]
+    );
     if (!profile) {
       return res.status(404).json({ error: 'Profile not found for Telegram user' });
     }
