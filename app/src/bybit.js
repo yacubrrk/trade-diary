@@ -152,6 +152,8 @@ async function fetchBybitExecutionsBackfill({
   windowDays = 7,
   pageLimit = 200,
   maxPagesPerWindow = 20,
+  stopOnFirstNonEmpty = false,
+  maxWindows = 10000,
 }) {
   const all = [];
   const now = Date.now();
@@ -159,8 +161,11 @@ async function fetchBybitExecutionsBackfill({
   const safeLookbackDays = Math.max(safeWindowDays, Number(lookbackDays || 3650));
   const stepMs = safeWindowDays * 24 * 60 * 60 * 1000;
   const startBoundary = now - safeLookbackDays * 24 * 60 * 60 * 1000;
+  const safeMaxWindows = Math.max(1, Number(maxWindows || 1));
+  let windowsCount = 0;
 
   for (let endTime = now; endTime > startBoundary; endTime -= stepMs) {
+    if (windowsCount >= safeMaxWindows) break;
     const startTime = Math.max(startBoundary, endTime - stepMs);
     const batch = await fetchBybitExecutionsAll({
       apiKey,
@@ -173,6 +178,8 @@ async function fetchBybitExecutionsBackfill({
       maxPages: maxPagesPerWindow,
     });
     all.push(...batch);
+    windowsCount += 1;
+    if (stopOnFirstNonEmpty && batch.length > 0) break;
   }
 
   return all;
