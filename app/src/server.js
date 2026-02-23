@@ -5,7 +5,6 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const { getDb } = require('./db');
 const { fetchBybitExecutions, fetchBybitWalletBalance, fetchBybitP2POrders } = require('./bybit');
-const { fetchOkxSpotFillsPaginated, fetchOkxWalletBalance } = require('./okx');
 
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
@@ -24,19 +23,10 @@ const toNum = (v, d = 0) => {
 const roundMoney = (n) => Math.round((n + Number.EPSILON) * 1000000) / 1000000;
 const roundQty = (n) => Math.round((n + Number.EPSILON) * 1000000000000) / 1000000000000;
 const DUST_QTY = 0.000001;
-const EXCHANGES = {
-  BYBIT: 'BYBIT',
-  OKX: 'OKX',
-};
-const DEFAULT_BASE_URL = {
-  [EXCHANGES.BYBIT]: 'https://api.bybit.com',
-  [EXCHANGES.OKX]: 'https://www.okx.com',
-};
 const AUTO_SYNC_ENABLED = String(process.env.AUTO_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
 const AUTO_SYNC_INTERVAL_MINUTES = Math.max(5, Number(process.env.AUTO_SYNC_INTERVAL_MINUTES || 30));
 const AUTO_SYNC_DAYS = Math.max(1, Math.min(7, Number(process.env.AUTO_SYNC_DAYS || 2)));
-const OKX_SYNC_DAYS = Math.max(1, Math.min(90, Number(process.env.OKX_SYNC_DAYS || 90)));
-const PROFILE_SYNC_MIN_GAP_MS = Math.max(10, Number(process.env.PROFILE_SYNC_MIN_GAP_SECONDS || 20)) * 1000;
+const PROFILE_SYNC_MIN_GAP_MS = Math.max(60, Number(process.env.PROFILE_SYNC_MIN_GAP_SECONDS || 120)) * 1000;
 
 function buildClosedMetrics({ qty, entryPrice, exitPrice, entryCommission, exitCommission, entryTime, exitTime }) {
   const invested = qty * entryPrice;
@@ -54,11 +44,6 @@ function buildClosedMetrics({ qty, entryPrice, exitPrice, entryCommission, exitC
     pl_percent: roundMoney(plPercent),
     duration_minutes: durationMinutes,
   };
-}
-
-function normalizeExchange(input) {
-  const value = String(input || EXCHANGES.BYBIT).trim().toUpperCase();
-  return value === EXCHANGES.OKX ? EXCHANGES.OKX : EXCHANGES.BYBIT;
 }
 
 function makePublicId() {
@@ -105,13 +90,11 @@ function clearAuthCookie(res) {
 
 function mapProfileResponse(profile) {
   const apiKey = String(profile.api_key || '');
-  const exchange = normalizeExchange(profile.exchange);
   return {
     id: profile.id,
-    exchange,
     api_key_masked: apiKey ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}` : '',
     profile_name: profile.profile_name || null,
-    base_url: profile.base_url || DEFAULT_BASE_URL[exchange],
+    base_url: profile.base_url,
     last_read_trade_id: Number(profile.last_read_trade_id || 0),
   };
 }
@@ -397,97 +380,11 @@ function normalizeExecutions(executions) {
     .sort((a, b) => toNum(a.execTime) - toNum(b.execTime));
 }
 
-function normalizeOkxExecutions(fills) {
-  const groups = new Map();
-
-  for (const raw of fills || []) {
-    const side = String(raw.side || '').toUpperCase();
-    const instId = String(raw.instId || '').toUpperCase();
-    const symbol = instId.replace('-', '');
-    const [baseCcy = '', quoteCcy = ''] = instId.split('-');
-    const rawQty = toNum(raw.fillSz);
-    const price = toNum(raw.fillPx);
-    const quoteCcyUpper = quoteCcy.toUpperCase();
-    const baseCcyUpper = baseCcy.toUpperCase();
-    let qty = rawQty;
-    const fillCcy = String(raw.fillCcy || '').toUpperCase();
-    const tgtCcy = String(raw.tgtCcy || '').toLowerCase();
-    if ((fillCcy === quoteCcyUpper || (side === 'BUY' && tgtCcy === 'quote_ccy')) && price > 0) {
-      qty = rawQty / price;
-    }
-    const feeRaw = toNum(raw.fee);
-    const feeCcy = String(raw.feeCcy || raw.fillFeeCcy || '').toUpperCase();
-    const quoteValue = qty * price;
-    let fee = 0;
-    if (feeRaw !== 0) {
-      if (feeCcy === quoteCcyUpper || feeCcy === 'USDT' || feeCcy === 'USDC') {
-        fee = feeRaw;
-      } else if (feeCcy === baseCcyUpper && price > 0) {
-        fee = feeRaw * price;
-      }
-      // Sanity guard: ignore obviously broken fee values (>2% notional for spot).
-      const maxReasonableFee = Math.abs(quoteValue) * 0.02;
-      if (maxReasonableFee > 0 && Math.abs(fee) > maxReasonableFee) {
-        fee = 0;
-      }
-    }
-    const execTime = toNum(raw.fillTime);
-    const orderId = String(raw.ordId || '').trim();
-    const execId = String(raw.tradeId || raw.billId || '').trim();
-
-    if (quoteCcyUpper && !['USDT', 'USDC'].includes(quoteCcyUpper)) continue;
-    if (!symbol || !side || qty <= 0 || price <= 0 || execTime <= 0) continue;
-
-    const groupKey = orderId ? `${symbol}|${side}|${orderId}` : `${symbol}|${side}|${execId || execTime}`;
-    const quote = qty * price;
-
-    if (!groups.has(groupKey)) {
-      groups.set(groupKey, {
-        symbol,
-        side,
-        orderId,
-        execId: execId || `okx_${groupKey}`,
-        execQty: 0,
-        execFee: 0,
-        quoteSum: 0,
-        minExecTime: execTime,
-        maxExecTime: execTime,
-      });
-    }
-
-    const g = groups.get(groupKey);
-    g.execQty += qty;
-    // In OKX exports trading fee often comes negative for paid commission; store as positive cost.
-    g.execFee += Math.abs(fee);
-    g.quoteSum += quote;
-    if (execTime < g.minExecTime) g.minExecTime = execTime;
-    if (execTime > g.maxExecTime) g.maxExecTime = execTime;
-  }
-
-  return Array.from(groups.values())
-    .map((g) => ({
-      symbol: g.symbol,
-      side: g.side,
-      orderId: g.orderId || null,
-      execId: g.orderId || g.execId,
-      execQty: roundQty(g.execQty),
-      execFee: roundMoney(g.execFee),
-      execPrice: g.execQty > 0 ? g.quoteSum / g.execQty : 0,
-      execTime: g.side === 'BUY' ? g.minExecTime : g.maxExecTime,
-    }))
-    .sort((a, b) => toNum(a.execTime) - toNum(b.execTime));
-}
-
 async function syncBybitForProfile(db, profile, days) {
-  const exchange = normalizeExchange(profile.exchange);
-  if (exchange !== EXCHANGES.BYBIT) {
-    return { skipped: true, reason: `sync is not implemented for ${exchange}` };
-  }
-
   const apiKey = profile.api_key;
   const apiSecret = profile.api_secret;
   const recvWindow = Number(profile.recv_window || 5000);
-  const baseUrl = profile.base_url || DEFAULT_BASE_URL[EXCHANGES.BYBIT];
+  const baseUrl = profile.base_url || 'https://api.bybit.com';
 
   const safeDays = Math.max(1, Math.min(30, Number(days || 7)));
   const endTime = Date.now();
@@ -579,141 +476,13 @@ async function syncBybitForProfile(db, profile, days) {
   };
 }
 
-async function syncOkxForProfile(db, profile, days) {
-  const apiKey = profile.api_key;
-  const apiSecret = profile.api_secret;
-  const apiPassphrase = String(profile.api_passphrase || '');
-  const baseUrl = profile.base_url || DEFAULT_BASE_URL[EXCHANGES.OKX];
-  if (!apiPassphrase) {
-    throw new Error('api_passphrase is required for OKX profile');
-  }
-
-  const suspiciousRow = await db.get(
-    `SELECT COUNT(*) as cnt
-     FROM trades
-     WHERE owner_profile_id = ?
-       AND source = 'okx'
-       AND invested_usdt > 0
-       AND (
-         commission_usdt > invested_usdt * 0.05
-         OR ABS(pl_usdt) > invested_usdt * 2
-         OR ABS((qty * entry_price) - invested_usdt) > invested_usdt * 0.1
-       )`,
-    [profile.id]
-  );
-  if (Number(suspiciousRow?.cnt || 0) > 0) {
-    await db.run(`DELETE FROM trades WHERE owner_profile_id = ? AND source = 'okx'`, [profile.id]);
-  }
-
-  const safeDays = Math.max(1, Math.min(90, Number(days || OKX_SYNC_DAYS)));
-  const endTime = Date.now();
-  const startTime = endTime - safeDays * 24 * 60 * 60 * 1000;
-
-  const fills = await fetchOkxSpotFillsPaginated({
-    apiKey,
-    apiSecret,
-    apiPassphrase,
-    baseUrl,
-    beginMs: startTime,
-    endMs: endTime,
-    limit: 100,
-    maxPages: 20,
-  });
-
-  const sorted = normalizeOkxExecutions(fills);
-
-  let createdBuys = 0;
-  let closedFromSells = 0;
-  let unmatchedSellQty = 0;
-
-  for (const ex of sorted) {
-    const side = String(ex.side || '').toUpperCase();
-    const symbol = String(ex.symbol || '').toUpperCase();
-    const qty = toNum(ex.execQty);
-    const price = toNum(ex.execPrice);
-    const fee = Math.abs(toNum(ex.execFee));
-    const execId = String(ex.execId || '');
-    const execTime = toNum(ex.execTime);
-
-    if (!symbol || qty <= 0 || price <= 0 || !execTime) continue;
-
-    if (side === 'BUY') {
-      if (execId) {
-        const exists = await db.get(
-          'SELECT id FROM trades WHERE owner_profile_id = ? AND buy_exec_id = ? LIMIT 1',
-          [profile.id, execId]
-        );
-        if (exists) continue;
-      }
-
-      await db.run(
-        `INSERT INTO trades (
-          owner_profile_id,
-          symbol, entry_time, exit_time,
-          qty, remaining_qty,
-          entry_price, exit_price,
-          invested_usdt, received_usdt,
-          commission_usdt,
-          pl_usdt, pl_percent,
-          duration_minutes,
-          status, source,
-          buy_exec_id, sell_exec_id,
-          created_at
-        ) VALUES (?, ?, ?, NULL, ?, ?, ?, NULL, ?, NULL, ?, NULL, NULL, NULL, 'OPEN', 'okx', ?, NULL, ?)`,
-        [
-          profile.id,
-          symbol,
-          execTime,
-          qty,
-          qty,
-          price,
-          roundMoney(qty * price),
-          fee,
-          execId || null,
-          Date.now(),
-        ]
-      );
-      createdBuys += 1;
-    }
-
-    if (side === 'SELL') {
-      const result = await applySellExecutionFifo(db, profile.id, ex);
-      closedFromSells += result.closedCount;
-      unmatchedSellQty += toNum(result.unmatchedQty);
-    }
-  }
-
-  const dust_closed = await closeDustOpenTrades(db, profile.id);
-  await db.run('UPDATE profiles SET last_sync_at = ? WHERE id = ?', [Date.now(), profile.id]);
-
-  return {
-    synced_days: safeDays,
-    executions_received: sorted.length,
-    buys_created: createdBuys,
-    sell_matches_closed: closedFromSells,
-    unmatched_sell_qty: roundQty(unmatchedSellQty),
-    dust_closed,
-  };
-}
-
-async function syncForProfile(db, profile, days) {
-  const exchange = normalizeExchange(profile.exchange);
-  if (exchange === EXCHANGES.OKX) {
-    return syncOkxForProfile(db, profile, days);
-  }
-  return syncBybitForProfile(db, profile, days);
-}
-
-async function syncBybitForProfileIfStale(db, profile, days = null) {
-  const exchange = normalizeExchange(profile.exchange);
-  const effectiveDays =
-    days === null || days === undefined ? (exchange === EXCHANGES.OKX ? OKX_SYNC_DAYS : AUTO_SYNC_DAYS) : days;
+async function syncBybitForProfileIfStale(db, profile, days = AUTO_SYNC_DAYS) {
   const lastSyncAt = Number(profile.last_sync_at || 0);
   const now = Date.now();
   if (now - lastSyncAt < PROFILE_SYNC_MIN_GAP_MS) {
     return { skipped: true };
   }
-  return syncForProfile(db, profile, effectiveDays);
+  return syncBybitForProfile(db, profile, days);
 }
 
 async function repairInvalidTradeTimes(db) {
@@ -728,40 +497,6 @@ async function repairInvalidTradeTimes(db) {
   return Number(result.changes || 0);
 }
 
-async function repairSuspiciousOkxTrades(db) {
-  // Clamp impossible commissions for already imported OKX trades and recompute P/L.
-  const rows = await db.all(
-    `SELECT id, status, invested_usdt, received_usdt, commission_usdt
-     FROM trades
-     WHERE source = 'okx'
-       AND invested_usdt > 0
-       AND commission_usdt > invested_usdt * 0.02`
-  );
-
-  let fixed = 0;
-  for (const t of rows) {
-    const invested = Math.max(0, toNum(t.invested_usdt));
-    const received = toNum(t.received_usdt);
-    const cappedCommission = roundMoney(invested * 0.002);
-
-    if (String(t.status || '').toUpperCase() === 'CLOSED' && Number.isFinite(received)) {
-      const pl = roundMoney(received - invested - cappedCommission);
-      const plPercent = invested > 0 ? roundMoney((pl / invested) * 100) : 0;
-      await db.run(
-        `UPDATE trades
-         SET commission_usdt = ?, pl_usdt = ?, pl_percent = ?
-         WHERE id = ?`,
-        [cappedCommission, pl, plPercent, t.id]
-      );
-    } else {
-      await db.run(`UPDATE trades SET commission_usdt = ? WHERE id = ?`, [cappedCommission, t.id]);
-    }
-    fixed += 1;
-  }
-
-  return fixed;
-}
-
 let autoSyncRunning = false;
 async function runAutoSync() {
   if (autoSyncRunning) return;
@@ -771,9 +506,7 @@ async function runAutoSync() {
     const profiles = await db.all('SELECT * FROM profiles ORDER BY id ASC');
     for (const profile of profiles) {
       try {
-        const exchange = normalizeExchange(profile.exchange);
-        const days = exchange === EXCHANGES.OKX ? OKX_SYNC_DAYS : AUTO_SYNC_DAYS;
-        await syncForProfile(db, profile, days);
+        await syncBybitForProfile(db, profile, AUTO_SYNC_DAYS);
       } catch (err) {
         console.error(`[auto-sync] profile ${profile.id} failed: ${err.message}`);
       }
@@ -790,12 +523,10 @@ app.get('/api/health', (_req, res) => {
 app.post('/api/auth/register', async (req, res) => {
   try {
     const db = await getDb();
-    const exchange = normalizeExchange(req.body.exchange);
     const apiKey = String(req.body.api_key || '').trim();
     const apiSecret = String(req.body.api_secret || '').trim();
-    const apiPassphrase = String(req.body.api_passphrase || '');
     const profileName = String(req.body.profile_name || '').trim();
-    const baseUrl = String(req.body.base_url || DEFAULT_BASE_URL[exchange]).trim();
+    const baseUrl = String(req.body.base_url || 'https://api.bybit.com').trim();
     const recvWindow = Math.max(1000, Math.min(15000, Number(req.body.recv_window || 5000)));
     const tgUserId = String(req.body.tg_user_id || '').trim() || null;
     const now = Date.now();
@@ -803,23 +534,19 @@ app.post('/api/auth/register', async (req, res) => {
     if (!apiKey || !apiSecret) {
       return res.status(400).json({ error: 'api_key and api_secret are required' });
     }
-    if (exchange === EXCHANGES.OKX && !apiPassphrase) {
-      return res.status(400).json({ error: 'api_passphrase is required for OKX' });
-    }
 
     const existing = await db.get('SELECT * FROM profiles WHERE api_key = ? LIMIT 1', [apiKey]);
 
     if (existing) {
       await db.run(
         `UPDATE profiles
-         SET exchange = ?, api_secret = ?, api_passphrase = ?, base_url = ?, recv_window = ?, tg_user_id = COALESCE(?, tg_user_id), profile_name = COALESCE(NULLIF(?, ''), profile_name), last_selected_at = ?
+         SET api_secret = ?, base_url = ?, recv_window = ?, tg_user_id = COALESCE(?, tg_user_id), profile_name = COALESCE(NULLIF(?, ''), profile_name), last_selected_at = ?
          WHERE id = ?`,
-        [exchange, apiSecret, apiPassphrase || null, baseUrl, recvWindow, tgUserId, profileName, now, existing.id]
+        [apiSecret, baseUrl, recvWindow, tgUserId, profileName, now, existing.id]
       );
       setAuthCookie(res, existing.public_id);
       const refreshed = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [existing.id]);
-      const syncDays = exchange === EXCHANGES.OKX ? OKX_SYNC_DAYS : 7;
-      syncBybitForProfileIfStale(db, refreshed, syncDays).catch((err) =>
+      syncBybitForProfileIfStale(db, refreshed, 7).catch((err) =>
         console.error(`[auth-sync] profile ${existing.id} failed: ${err.message}`)
       );
 
@@ -843,14 +570,13 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     const result = await db.run(
-      `INSERT INTO profiles (public_id, tg_user_id, profile_name, exchange, api_key, api_secret, api_passphrase, base_url, recv_window, last_selected_at, last_sync_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-      [publicId, tgUserId, profileName || null, exchange, apiKey, apiSecret, apiPassphrase || null, baseUrl, recvWindow, now, now]
+      `INSERT INTO profiles (public_id, tg_user_id, profile_name, api_key, api_secret, base_url, recv_window, last_selected_at, last_sync_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+      [publicId, tgUserId, profileName || null, apiKey, apiSecret, baseUrl, recvWindow, now, now]
     );
     setAuthCookie(res, publicId);
     const createdProfile = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [result.lastID]);
-    const syncDays = exchange === EXCHANGES.OKX ? OKX_SYNC_DAYS : 7;
-    syncBybitForProfileIfStale(db, createdProfile, syncDays).catch((err) =>
+    syncBybitForProfileIfStale(db, createdProfile, 7).catch((err) =>
       console.error(`[auth-sync] profile ${result.lastID} failed: ${err.message}`)
     );
 
@@ -955,7 +681,7 @@ app.post('/api/auth/logout', (_req, res) => {
 app.get('/api/trades', requireProfile, async (req, res) => {
   const db = await getDb();
   try {
-    await syncBybitForProfileIfStale(db, req.profile);
+    await syncBybitForProfileIfStale(db, req.profile, AUTO_SYNC_DAYS);
   } catch (err) {
     console.error(`[on-open-sync] trades profile ${req.profile.id} failed: ${err.message}`);
   }
@@ -999,7 +725,7 @@ app.put('/api/trades/:id/close', requireProfile, async (req, res) => {
 app.get('/api/stats', requireProfile, async (req, res) => {
   const db = await getDb();
   try {
-    await syncBybitForProfileIfStale(db, req.profile);
+    await syncBybitForProfileIfStale(db, req.profile, AUTO_SYNC_DAYS);
   } catch (err) {
     console.error(`[on-open-sync] stats profile ${req.profile.id} failed: ${err.message}`);
   }
@@ -1046,11 +772,8 @@ app.get('/api/stats', requireProfile, async (req, res) => {
 app.post('/api/bybit/sync', requireProfile, async (req, res) => {
   try {
     const db = await getDb();
-    const exchange = normalizeExchange(req.profile.exchange);
-    const maxDays = exchange === EXCHANGES.OKX ? 90 : 30;
-    const defaultDays = exchange === EXCHANGES.OKX ? OKX_SYNC_DAYS : 7;
-    const days = Math.max(1, Math.min(maxDays, Number(req.body.days || defaultDays)));
-    const result = await syncForProfile(db, req.profile, days);
+    const days = Math.max(1, Math.min(30, Number(req.body.days || 7)));
+    const result = await syncBybitForProfile(db, req.profile, days);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1060,7 +783,7 @@ app.post('/api/bybit/sync', requireProfile, async (req, res) => {
 app.post('/api/bybit/auto-sync', requireProfile, async (req, res) => {
   try {
     const db = await getDb();
-    const result = await syncBybitForProfileIfStale(db, req.profile);
+    const result = await syncBybitForProfileIfStale(db, req.profile, AUTO_SYNC_DAYS);
     res.json({ ok: true, ...(result || {}) });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1098,47 +821,10 @@ app.post('/api/profile/name', requireProfile, async (req, res) => {
 
 app.get('/api/balance', requireProfile, async (req, res) => {
   try {
-    const exchange = normalizeExchange(req.profile.exchange);
-    if (exchange === EXCHANGES.OKX) {
-      const result = await fetchOkxWalletBalance({
-        apiKey: req.profile.api_key,
-        apiSecret: req.profile.api_secret,
-        apiPassphrase: req.profile.api_passphrase,
-        baseUrl: req.profile.base_url || DEFAULT_BASE_URL[EXCHANGES.OKX],
-      });
-
-      const tradingDetails = Array.isArray(result.trading?.details) ? result.trading.details : [];
-      const nonZeroTrading = tradingDetails
-        .map((d) => ({
-          coin: d.ccy,
-          wallet_balance: toNum(d.cashBal),
-          available_to_withdraw: toNum(d.availBal),
-          locked: toNum(d.frozenBal),
-          usd_value: toNum(d.eqUsd),
-        }))
-        .filter((c) => c.wallet_balance > 0 || c.locked > 0 || c.usd_value > 0)
-        .sort((a, b) => b.usd_value - a.usd_value);
-
-      const funding = (result.funding || [])
-        .map((c) => ({
-          coin: c.ccy,
-          transfer_balance: toNum(c.availBal),
-          wallet_balance: toNum(c.bal),
-        }))
-        .filter((c) => c.transfer_balance > 0 || c.wallet_balance > 0);
-
-      return res.json({
-        exchange,
-        unified_total_usd: toNum(result.trading?.totalEq),
-        unified_coins: nonZeroTrading,
-        fund_coins: funding,
-      });
-    }
-
     const result = await fetchBybitWalletBalance({
       apiKey: req.profile.api_key,
       apiSecret: req.profile.api_secret,
-      baseUrl: req.profile.base_url || DEFAULT_BASE_URL[EXCHANGES.BYBIT],
+      baseUrl: req.profile.base_url || 'https://api.bybit.com',
       recvWindow: Number(req.profile.recv_window || 5000),
     });
 
@@ -1176,16 +862,6 @@ app.get('/api/balance', requireProfile, async (req, res) => {
 
 app.get('/api/p2p/orders', requireProfile, async (req, res) => {
   try {
-    const exchange = normalizeExchange(req.profile.exchange);
-    if (exchange !== EXCHANGES.BYBIT) {
-      return res.json({
-        exchange,
-        supported: false,
-        total: 0,
-        rows: [],
-      });
-    }
-
     const days = Math.max(1, Math.min(30, Number(req.query.days || 7)));
     const endTime = Date.now();
     const beginTime = endTime - days * 24 * 60 * 60 * 1000;
@@ -1193,7 +869,7 @@ app.get('/api/p2p/orders', requireProfile, async (req, res) => {
     const result = await fetchBybitP2POrders({
       apiKey: req.profile.api_key,
       apiSecret: req.profile.api_secret,
-      baseUrl: req.profile.base_url || DEFAULT_BASE_URL[EXCHANGES.BYBIT],
+      baseUrl: req.profile.base_url || 'https://api.bybit.com',
       recvWindow: Number(req.profile.recv_window || 5000),
       page: 1,
       size: 30,
@@ -1225,19 +901,11 @@ app.get('/api/p2p/orders', requireProfile, async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server started: http://localhost:${PORT}`);
-  let repairedInvalidTimes = 0;
   getDb()
-    .then(async (db) => {
-      repairedInvalidTimes = await repairInvalidTradeTimes(db);
-      const repairedOkx = await repairSuspiciousOkxTrades(db);
-      return { repairedOkx };
-    })
-    .then(({ repairedOkx }) => {
-      if (repairedInvalidTimes > 0) {
-        console.log(`[repair] fixed invalid trade times: ${repairedInvalidTimes}`);
-      }
-      if (repairedOkx > 0) {
-        console.log(`[repair] fixed suspicious okx commissions: ${repairedOkx}`);
+    .then((db) => repairInvalidTradeTimes(db))
+    .then((fixed) => {
+      if (fixed > 0) {
+        console.log(`[repair] fixed invalid trade times: ${fixed}`);
       }
     })
     .catch((err) => console.error(`[repair] failed: ${err.message}`));

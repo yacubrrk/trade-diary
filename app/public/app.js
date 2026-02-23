@@ -9,9 +9,6 @@ const STORAGE_TOKEN_KEY = 'trade_diary_token';
 
 const $authCard = document.getElementById('auth-card');
 const $authForm = document.getElementById('auth-form');
-const $exchangeInput = document.getElementById('exchange-input');
-const $okxPassphraseWrap = document.getElementById('okx-passphrase-wrap');
-const $apiPassphraseInput = document.getElementById('api-passphrase-input');
 const $appSections = document.getElementById('app-sections');
 const $spotView = document.getElementById('spot-view');
 const $p2pView = document.getElementById('p2p-view');
@@ -23,12 +20,8 @@ const $profileSettingsBtn = document.getElementById('profile-settings-btn');
 const $profileSettingsPanel = document.getElementById('profile-settings-panel');
 const $profileSwitchSelect = document.getElementById('profile-switch-select');
 const $switchProfileBtn = document.getElementById('switch-profile-btn');
-const $addAccountBtn = document.getElementById('add-account-btn');
-const $editProfileNameBtn = document.getElementById('edit-profile-name-btn');
-const $inlineProfileNameEditor = document.getElementById('inline-profile-name-editor');
-const $inlineProfileNameInput = document.getElementById('inline-profile-name-input');
-const $inlineProfileNameSaveBtn = document.getElementById('inline-profile-name-save-btn');
-const $inlineProfileNameCancelBtn = document.getElementById('inline-profile-name-cancel-btn');
+const $profileNameInput = document.getElementById('profile-name-input');
+const $saveProfileNameBtn = document.getElementById('save-profile-name-btn');
 const $bottomNav = document.getElementById('bottom-nav');
 const $tabSpot = document.getElementById('tab-spot');
 const $tabP2P = document.getElementById('tab-p2p');
@@ -53,12 +46,10 @@ let latestTradeId = 0;
 let autoRefreshTimer = null;
 let currentProfileName = '';
 let currentProfileId = 0;
-let currentExchange = 'BYBIT';
 
 const fmt = (n) => (n === null || n === undefined ? '-' : Number(n).toFixed(4));
 const fmtQty = (n) => (n === null || n === undefined ? '-' : Number(n).toFixed(8));
 const fmtTime = (ms) => (ms ? new Date(Number(ms)).toLocaleString() : '-');
-const normalizeExchange = (value) => (String(value || 'BYBIT').trim().toUpperCase() === 'OKX' ? 'OKX' : 'BYBIT');
 
 function formatDurationFull(totalSecInput) {
   let totalSec = Math.max(0, Math.floor(Number(totalSecInput || 0)));
@@ -112,9 +103,6 @@ function setLoggedOutView() {
   $mobileTrades.innerHTML = '';
   $stats.innerHTML = '';
   if ($profileSwitchSelect) $profileSwitchSelect.innerHTML = '';
-  currentExchange = normalizeExchange($exchangeInput?.value || 'BYBIT');
-  togglePassphraseField();
-  $inlineProfileNameEditor.classList.add('hidden');
 }
 
 function setActiveTab(tab) {
@@ -131,12 +119,10 @@ function setLoggedInView(profile) {
   $appSections.classList.remove('hidden');
   $bottomNav.classList.remove('hidden');
   currentProfileId = Number(profile.id || 0);
-  currentExchange = normalizeExchange(profile.exchange);
   currentProfileName = String(profile.profile_name || '').trim();
   $profileName.textContent = currentProfileName || 'Профиль без имени';
-  $profileInfo.textContent = `Биржа: ${currentExchange} (${profile.base_url})`;
-  $inlineProfileNameInput.value = '';
-  $inlineProfileNameEditor.classList.add('hidden');
+  $profileInfo.textContent = `Биржа: Bybit (${profile.base_url})`;
+  $profileNameInput.value = currentProfileName;
   $profileSettingsPanel.classList.add('hidden');
   lastSeenTradeId = Number(profile.last_read_trade_id || 0);
   setActiveTab('spot');
@@ -150,8 +136,7 @@ async function loadProfileSwitchOptions() {
     if (!$profileSwitchSelect) return;
     $profileSwitchSelect.innerHTML = rows
       .map((p) => {
-        const exchange = normalizeExchange(p.exchange);
-        const title = `${exchange}: ${p.profile_name || p.api_key_masked || `Профиль #${p.id}`}`;
+        const title = p.profile_name || p.api_key_masked || `Профиль #${p.id}`;
         const selected = Number(p.id) === Number(currentProfileId) ? 'selected' : '';
         return `<option value="${p.id}" ${selected}>${title}</option>`;
       })
@@ -328,23 +313,9 @@ function setNewTradesIndicator(count) {
   }
 }
 
-function togglePassphraseField() {
-  const exchange = normalizeExchange($exchangeInput?.value || 'BYBIT');
-  const isOkx = exchange === 'OKX';
-  $okxPassphraseWrap.classList.toggle('hidden', !isOkx);
-  $apiPassphraseInput.required = isOkx;
-  if (!isOkx) {
-    $apiPassphraseInput.value = '';
-  }
-}
-
 async function loadP2POrders() {
   try {
     const data = await api('/api/p2p/orders?days=7');
-    if (data.supported === false) {
-      $p2pList.innerHTML = `<div class="hint">P2P недоступно для биржи ${data.exchange || currentExchange}</div>`;
-      return;
-    }
     const rows = data.rows || [];
     if (!rows.length) {
       $p2pList.innerHTML = '<div class="hint">За последние 7 дней P2P сделок нет</div>';
@@ -378,11 +349,6 @@ async function loadP2POrders() {
 async function loadProfileBalance() {
   try {
     const data = await api('/api/balance');
-    if (data.supported === false) {
-      $profileBalanceSummary.textContent = '-';
-      $profileBalanceList.innerHTML = `<div class="hint">${data.message || `Баланс недоступен для ${data.exchange || currentExchange}`}</div>`;
-      return;
-    }
     const total = Number(data.unified_total_usd || 0).toFixed(2);
     $profileBalanceSummary.textContent = total;
 
@@ -436,46 +402,13 @@ function startAutoRefreshLoop() {
   stopAutoRefreshLoop();
   autoRefreshTimer = setInterval(() => {
     autoSyncAndRefresh().catch(() => {});
-  }, 20000);
+  }, 45000);
 }
 
 function stopAutoRefreshLoop() {
   if (!autoRefreshTimer) return;
   clearInterval(autoRefreshTimer);
   autoRefreshTimer = null;
-}
-
-function showInlineProfileEditor(show) {
-  $inlineProfileNameEditor.classList.toggle('hidden', !show);
-  if (show) {
-    $inlineProfileNameInput.value = '';
-    $inlineProfileNameInput.focus();
-  }
-}
-
-async function saveProfileNameInline() {
-  const name = String($inlineProfileNameInput.value || '').trim();
-  if (!name) {
-    alert('Введите имя профиля');
-    return;
-  }
-  try {
-    $inlineProfileNameSaveBtn.disabled = true;
-    $inlineProfileNameSaveBtn.classList.add('is-loading');
-    const result = await api('/api/profile/name', {
-      method: 'POST',
-      body: JSON.stringify({ profile_name: name }),
-    });
-    currentProfileName = String(result.profile_name || name);
-    $profileName.textContent = currentProfileName;
-    showInlineProfileEditor(false);
-    await loadProfileSwitchOptions();
-  } catch (err) {
-    alert(err.message);
-  } finally {
-    $inlineProfileNameSaveBtn.disabled = false;
-    $inlineProfileNameSaveBtn.classList.remove('is-loading');
-  }
 }
 
 $authForm.addEventListener('submit', async (e) => {
@@ -488,10 +421,8 @@ $authForm.addEventListener('submit', async (e) => {
     }
 
     const payload = {
-      exchange: normalizeExchange($authForm.elements.exchange.value),
       api_key: $authForm.elements.api_key.value.trim(),
       api_secret: $authForm.elements.api_secret.value.trim(),
-      api_passphrase: String($authForm.elements.api_passphrase.value || '') || undefined,
       tg_user_id: telegramUserId || undefined,
     };
 
@@ -520,14 +451,6 @@ $changeKeysBtn.addEventListener('click', () => {
   authToken = '';
   localStorage.removeItem(STORAGE_TOKEN_KEY);
   setLoggedOutView();
-});
-
-$addAccountBtn.addEventListener('click', () => {
-  // Keep current profile intact on backend, just return user to auth form to add second profile.
-  authToken = '';
-  localStorage.removeItem(STORAGE_TOKEN_KEY);
-  setLoggedOutView();
-  $profileSettingsPanel.classList.add('hidden');
 });
 
 $profileSettingsBtn.addEventListener('click', () => {
@@ -560,26 +483,27 @@ $switchProfileBtn.addEventListener('click', async () => {
   }
 });
 
-$editProfileNameBtn.addEventListener('click', () => {
-  showInlineProfileEditor($inlineProfileNameEditor.classList.contains('hidden'));
-});
-
-$inlineProfileNameSaveBtn.addEventListener('click', () => {
-  saveProfileNameInline().catch((err) => alert(err.message));
-});
-
-$inlineProfileNameCancelBtn.addEventListener('click', () => {
-  showInlineProfileEditor(false);
-});
-
-$inlineProfileNameInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    saveProfileNameInline().catch((err) => alert(err.message));
+$saveProfileNameBtn.addEventListener('click', async () => {
+  const name = String($profileNameInput.value || '').trim();
+  if (!name) {
+    alert('Введите имя профиля');
+    return;
   }
-  if (e.key === 'Escape') {
-    e.preventDefault();
-    showInlineProfileEditor(false);
+  try {
+    $saveProfileNameBtn.disabled = true;
+    $saveProfileNameBtn.classList.add('is-loading');
+    const result = await api('/api/profile/name', {
+      method: 'POST',
+      body: JSON.stringify({ profile_name: name }),
+    });
+    currentProfileName = String(result.profile_name || name);
+    $profileName.textContent = currentProfileName;
+    await loadProfileSwitchOptions();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    $saveProfileNameBtn.disabled = false;
+    $saveProfileNameBtn.classList.remove('is-loading');
   }
 });
 
@@ -616,7 +540,6 @@ $tradeModal.addEventListener('click', (e) => {
 $tabSpot.addEventListener('click', () => setActiveTab('spot'));
 $tabP2P.addEventListener('click', () => setActiveTab('p2p'));
 $tabProfile.addEventListener('click', () => setActiveTab('profile'));
-$exchangeInput.addEventListener('change', togglePassphraseField);
 
 async function bootstrap() {
   try {
@@ -643,4 +566,3 @@ async function bootstrap() {
 }
 
 bootstrap().catch((e) => alert(e.message));
-togglePassphraseField();
