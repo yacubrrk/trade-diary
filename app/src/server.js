@@ -482,17 +482,15 @@ async function syncBybitForProfile(db, profile, options = {}) {
         pageLimit: 200,
         maxPagesPerWindow: 20,
       })
-    : await fetchBybitExecutionsBackfill({
+    : await fetchBybitExecutionsAll({
         apiKey,
         apiSecret,
         baseUrl,
         recvWindow,
-        lookbackDays: 365,
-        windowDays: 7,
+        startTime: Date.now() - 30 * 24 * 60 * 60 * 1000,
+        endTime: Date.now(),
         pageLimit: 200,
-        maxPagesPerWindow: 10,
-        stopOnFirstNonEmpty: true,
-        maxWindows: 60,
+        maxPages: 20,
       });
 
   const sorted = normalizeExecutions(executions);
