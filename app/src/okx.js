@@ -78,48 +78,6 @@ async function fetchOkxSpotFills({ apiKey, apiSecret, apiPassphrase, baseUrl, be
   return Array.isArray(body.data) ? body.data : [];
 }
 
-async function fetchOkxSpotFillsAll({
-  apiKey,
-  apiSecret,
-  apiPassphrase,
-  baseUrl,
-  pageLimit = 100,
-  maxPages = 300,
-}) {
-  const all = [];
-  let before = '';
-  let pages = 0;
-
-  while (pages < Math.max(1, Number(maxPages || 1))) {
-    const body = await okxRequest({
-      method: 'GET',
-      path: '/api/v5/trade/fills-history',
-      apiKey,
-      apiSecret,
-      apiPassphrase,
-      baseUrl,
-      query: {
-        instType: 'SPOT',
-        limit: Math.max(1, Math.min(100, Number(pageLimit || 100))),
-        before: before || undefined,
-      },
-    });
-
-    const data = Array.isArray(body.data) ? body.data : [];
-    all.push(...data);
-    pages += 1;
-
-    if (!data.length) break;
-
-    const last = data[data.length - 1] || {};
-    const nextBefore = String(last.billId || last.tradeId || '').trim();
-    if (!nextBefore || nextBefore === before) break;
-    before = nextBefore;
-  }
-
-  return all;
-}
-
 async function fetchOkxWalletBalance({ apiKey, apiSecret, apiPassphrase, baseUrl }) {
   const trading = await okxRequest({
     method: 'GET',
@@ -152,6 +110,6 @@ async function fetchOkxWalletBalance({ apiKey, apiSecret, apiPassphrase, baseUrl
 
 module.exports = {
   fetchOkxSpotFills,
-  fetchOkxSpotFillsAll,
   fetchOkxWalletBalance,
 };
+
