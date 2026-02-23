@@ -600,10 +600,10 @@ async function syncOkxForProfile(db, profile, options = {}) {
         apiSecret,
         apiPassphrase,
         baseUrl,
-        lookbackDays: 730,
+        lookbackDays: 3650,
         windowDays: 90,
         stopOnFirstNonEmpty: true,
-        maxWindows: 8,
+        maxWindows: 40,
       });
 
   const sorted = normalizeOkxExecutions(fills);
@@ -1004,9 +1004,7 @@ app.get('/api/trades', requireProfile, async (req, res) => {
       await syncForProfile(db, req.profile, { fullHistory: false, markHistorySynced: false });
     } catch (err) {
       console.error(`[initial-sync] trades profile ${req.profile.id} failed: ${err.message}`);
-      if (!String(err.message || '').includes('Too Many Requests') && !String(err.message || '').includes('50011')) {
-        initialSyncError = err;
-      }
+      initialSyncError = err;
     }
   } else {
     triggerProfileSync(db, req.profile.id, 'on-open-sync-trades');
