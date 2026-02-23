@@ -801,6 +801,18 @@ app.post('/api/auth/register', async (req, res) => {
     if (exchange === EXCHANGES.OKX && !apiPassphrase) {
       return res.status(400).json({ error: 'api_passphrase is required for OKX' });
     }
+    if (exchange === EXCHANGES.OKX) {
+      try {
+        await fetchOkxWalletBalance({
+          apiKey,
+          apiSecret,
+          apiPassphrase,
+          baseUrl,
+        });
+      } catch (err) {
+        return res.status(400).json({ error: `OKX ключи не прошли проверку: ${err.message}` });
+      }
+    }
 
     const existing = await db.get('SELECT * FROM profiles WHERE api_key = ? LIMIT 1', [apiKey]);
 

@@ -18,8 +18,8 @@ async function okxRequest({
   retries = 3,
 }) {
   const cleanApiKey = String(apiKey || '').trim();
-  const cleanApiSecret = String(apiSecret || '').trim();
-  const cleanPassphrase = String(apiPassphrase || '').trim();
+  const cleanApiSecret = String(apiSecret || '');
+  const cleanPassphrase = String(apiPassphrase || '');
   const cleanBaseUrl = String(baseUrl || '').trim();
   const jsonBody = body ? JSON.stringify(body) : '';
 
@@ -30,16 +30,17 @@ async function okxRequest({
   }
   const queryString = params.toString();
   const requestPathWithQuery = queryString ? `${path}?${queryString}` : path;
-  const timestamp = new Date().toISOString();
-  const sign = signOkx({
-    timestamp,
-    method,
-    requestPathWithQuery,
-    body: method.toUpperCase() === 'POST' ? jsonBody : '',
-    apiSecret: cleanApiSecret,
-  });
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const timestamp = new Date().toISOString();
+    const sign = signOkx({
+      timestamp,
+      method,
+      requestPathWithQuery,
+      body: method.toUpperCase() === 'POST' ? jsonBody : '',
+      apiSecret: cleanApiSecret,
+    });
+
     const res = await fetch(`${cleanBaseUrl}${requestPathWithQuery}`, {
       method,
       headers: {
@@ -72,6 +73,10 @@ async function okxRequest({
     }
 
     if (parsed && String(parsed.code || '0') !== '0') {
+      const code = String(parsed.code || '');
+      if (code === '50113') {
+        throw new Error('OKX error: Invalid Sign (проверь API Key / Secret / Passphrase и режим API ключа)');
+      }
       throw new Error(`OKX error: ${parsed.msg || 'unknown error'}`);
     }
 
