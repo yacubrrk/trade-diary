@@ -34,7 +34,7 @@ const DEFAULT_BASE_URL = {
 };
 const AUTO_SYNC_ENABLED = String(process.env.AUTO_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
 const AUTO_SYNC_INTERVAL_MINUTES = Math.max(5, Number(process.env.AUTO_SYNC_INTERVAL_MINUTES || 30));
-const PROFILE_SYNC_MIN_GAP_MS = Math.max(10, Number(process.env.PROFILE_SYNC_MIN_GAP_SECONDS || 20)) * 1000;
+const PROFILE_SYNC_MIN_GAP_MS = Math.max(60, Number(process.env.PROFILE_SYNC_MIN_GAP_SECONDS || 120)) * 1000;
 const activeFullHistorySyncs = new Set();
 
 function buildClosedMetrics({ qty, entryPrice, exitPrice, entryCommission, exitCommission, entryTime, exitTime }) {
@@ -406,24 +406,12 @@ function normalizeOkxExecutions(fills) {
     const [baseCcy = '', quoteCcy = ''] = instId.split('-');
     const price = toNum(raw.fillPx);
     const rawQty = toNum(raw.fillSz);
-    const fillCcy = String(raw.fillCcy || '').toUpperCase();
     const tgtCcy = String(raw.tgtCcy || '').toLowerCase();
     let qty = rawQty;
-    const quoteCcyUpper = quoteCcy.toUpperCase();
-    const baseCcyUpper = baseCcy.toUpperCase();
-    if ((fillCcy === quoteCcyUpper || (side === 'BUY' && tgtCcy === 'quote_ccy')) && price > 0) {
+    if (side === 'BUY' && tgtCcy === 'quote_ccy' && price > 0) {
       qty = rawQty / price;
     }
-    const feeRaw = Math.abs(toNum(raw.fee));
-    const feeCcy = String(raw.feeCcy || raw.fillFeeCcy || '').toUpperCase();
-    let fee = 0;
-    if (feeRaw > 0) {
-      if (feeCcy === quoteCcyUpper || feeCcy === 'USDT' || feeCcy === 'USDC') {
-        fee = feeRaw;
-      } else if (feeCcy === baseCcyUpper && price > 0) {
-        fee = feeRaw * price;
-      }
-    }
+    const fee = Math.abs(toNum(raw.fee));
     const execTime = toNum(raw.fillTime);
     const orderId = String(raw.ordId || '').trim();
     const execId = String(raw.tradeId || raw.billId || '').trim();
@@ -450,7 +438,7 @@ function normalizeOkxExecutions(fills) {
 
     const g = groups.get(groupKey);
     g.execQty += qty;
-    g.execFee += Math.max(0, fee);
+    g.execFee += fee;
     g.quoteSum += quote;
     if (execTime < g.minExecTime) g.minExecTime = execTime;
     if (execTime > g.maxExecTime) g.maxExecTime = execTime;
@@ -594,24 +582,6 @@ async function syncOkxForProfile(db, profile, options = {}) {
   const baseUrl = profile.base_url || DEFAULT_BASE_URL[EXCHANGES.OKX];
   if (!apiPassphrase) {
     throw new Error('api_passphrase is required for OKX profile');
-  }
-
-  const badOkxRow = await db.get(
-    `SELECT COUNT(*) as cnt
-     FROM trades
-     WHERE owner_profile_id = ?
-       AND source = 'okx'
-       AND invested_usdt > 0
-       AND (
-         commission_usdt > invested_usdt * 0.5
-         OR ABS(pl_usdt) > invested_usdt * 3
-       )`,
-    [profile.id]
-  );
-  const hasBadOkxData = Number(badOkxRow?.cnt || 0) > 0;
-  if (hasBadOkxData) {
-    await db.run(`DELETE FROM trades WHERE owner_profile_id = ? AND source = 'okx'`, [profile.id]);
-    await db.run(`UPDATE profiles SET history_synced_once = 0 WHERE id = ?`, [profile.id]);
   }
 
   const fullHistory = Boolean(options.fullHistory);
