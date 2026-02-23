@@ -669,30 +669,6 @@ async function repairInvalidTradeTimes(db) {
 }
 
 let autoSyncRunning = false;
-const activeProfileSyncs = new Set();
-
-function triggerProfileSync(db, profileId, source) {
-  const safeProfileId = Number(profileId || 0);
-  if (!safeProfileId || activeProfileSyncs.has(safeProfileId)) {
-    return { started: false, reason: 'already_running_or_invalid' };
-  }
-
-  activeProfileSyncs.add(safeProfileId);
-  (async () => {
-    try {
-      const fresh = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [safeProfileId]);
-      if (!fresh) return;
-      await syncForProfileIfStale(db, fresh);
-    } catch (err) {
-      console.error(`[${source}] profile ${safeProfileId} failed: ${err.message}`);
-    } finally {
-      activeProfileSyncs.delete(safeProfileId);
-    }
-  })();
-
-  return { started: true };
-}
-
 async function runAutoSync() {
   if (autoSyncRunning) return;
   autoSyncRunning = true;
@@ -701,7 +677,7 @@ async function runAutoSync() {
     const profiles = await db.all('SELECT * FROM profiles ORDER BY id ASC');
     for (const profile of profiles) {
       try {
-        await syncForProfileIfStale(db, profile);
+        await syncForProfile(db, profile);
       } catch (err) {
         console.error(`[auto-sync] profile ${profile.id} failed: ${err.message}`);
       }
@@ -880,7 +856,11 @@ app.post('/api/auth/logout', (_req, res) => {
 
 app.get('/api/trades', requireProfile, async (req, res) => {
   const db = await getDb();
-  triggerProfileSync(db, req.profile.id, 'on-open-sync-trades');
+  try {
+    await syncForProfileIfStale(db, req.profile);
+  } catch (err) {
+    console.error(`[on-open-sync] trades profile ${req.profile.id} failed: ${err.message}`);
+  }
   const status = (req.query.status || '').toUpperCase();
 
   const rows = status
@@ -920,7 +900,11 @@ app.put('/api/trades/:id/close', requireProfile, async (req, res) => {
 
 app.get('/api/stats', requireProfile, async (req, res) => {
   const db = await getDb();
-  triggerProfileSync(db, req.profile.id, 'on-open-sync-stats');
+  try {
+    await syncForProfileIfStale(db, req.profile);
+  } catch (err) {
+    console.error(`[on-open-sync] stats profile ${req.profile.id} failed: ${err.message}`);
+  }
 
   const total = await db.get('SELECT COUNT(*) as cnt FROM trades WHERE owner_profile_id = ?', [req.profile.id]);
   const open = await db.get("SELECT COUNT(*) as cnt FROM trades WHERE owner_profile_id = ? AND status = 'OPEN'", [
@@ -964,8 +948,8 @@ app.get('/api/stats', requireProfile, async (req, res) => {
 app.post('/api/bybit/sync', requireProfile, async (req, res) => {
   try {
     const db = await getDb();
-    const result = triggerProfileSync(db, req.profile.id, 'manual-sync');
-    res.json({ ok: true, ...(result || {}) });
+    const result = await syncForProfile(db, req.profile);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -974,7 +958,7 @@ app.post('/api/bybit/sync', requireProfile, async (req, res) => {
 app.post('/api/bybit/auto-sync', requireProfile, async (req, res) => {
   try {
     const db = await getDb();
-    const result = triggerProfileSync(db, req.profile.id, 'client-auto-sync');
+    const result = await syncForProfileIfStale(db, req.profile);
     res.json({ ok: true, ...(result || {}) });
   } catch (err) {
     res.status(500).json({ error: err.message });
