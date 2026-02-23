@@ -992,19 +992,8 @@ app.post('/api/auth/logout', (_req, res) => {
 
 app.get('/api/trades', requireProfile, async (req, res) => {
   const db = await getDb();
+  triggerProfileSync(db, req.profile.id, 'on-open-sync-trades');
   const status = (req.query.status || '').toUpperCase();
-  const totalRowBefore = await db.get('SELECT COUNT(*) as cnt FROM trades WHERE owner_profile_id = ?', [req.profile.id]);
-  const totalBefore = Number(totalRowBefore?.cnt || 0);
-
-  if (totalBefore === 0) {
-    try {
-      await syncForProfile(db, req.profile, { fullHistory: false, markHistorySynced: false });
-    } catch (err) {
-      console.error(`[initial-sync] trades profile ${req.profile.id} failed: ${err.message}`);
-    }
-  } else {
-    triggerProfileSync(db, req.profile.id, 'on-open-sync-trades');
-  }
 
   const rows = status
     ? await db.all(
@@ -1043,11 +1032,7 @@ app.put('/api/trades/:id/close', requireProfile, async (req, res) => {
 
 app.get('/api/stats', requireProfile, async (req, res) => {
   const db = await getDb();
-  const totalRowBefore = await db.get('SELECT COUNT(*) as cnt FROM trades WHERE owner_profile_id = ?', [req.profile.id]);
-  const totalBefore = Number(totalRowBefore?.cnt || 0);
-  if (totalBefore > 0) {
-    triggerProfileSync(db, req.profile.id, 'on-open-sync-stats');
-  }
+  triggerProfileSync(db, req.profile.id, 'on-open-sync-stats');
 
   const total = await db.get('SELECT COUNT(*) as cnt FROM trades WHERE owner_profile_id = ?', [req.profile.id]);
   const open = await db.get("SELECT COUNT(*) as cnt FROM trades WHERE owner_profile_id = ? AND status = 'OPEN'", [
