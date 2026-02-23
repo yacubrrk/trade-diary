@@ -409,7 +409,12 @@ function normalizeOkxExecutions(fills) {
     const price = toNum(raw.fillPx);
     const quoteCcyUpper = quoteCcy.toUpperCase();
     const baseCcyUpper = baseCcy.toUpperCase();
-    const qty = rawQty;
+    let qty = rawQty;
+    const fillCcy = String(raw.fillCcy || '').toUpperCase();
+    const tgtCcy = String(raw.tgtCcy || '').toLowerCase();
+    if ((fillCcy === quoteCcyUpper || (side === 'BUY' && tgtCcy === 'quote_ccy')) && price > 0) {
+      qty = rawQty / price;
+    }
     const feeRaw = toNum(raw.fee);
     const feeCcy = String(raw.feeCcy || raw.fillFeeCcy || '').toUpperCase();
     const quoteValue = qty * price;
@@ -452,7 +457,8 @@ function normalizeOkxExecutions(fills) {
 
     const g = groups.get(groupKey);
     g.execQty += qty;
-    g.execFee += fee;
+    // In OKX exports trading fee often comes negative for paid commission; store as positive cost.
+    g.execFee += Math.abs(fee);
     g.quoteSum += quote;
     if (execTime < g.minExecTime) g.minExecTime = execTime;
     if (execTime > g.maxExecTime) g.maxExecTime = execTime;
@@ -587,9 +593,12 @@ async function syncOkxForProfile(db, profile, days) {
      FROM trades
      WHERE owner_profile_id = ?
        AND source = 'okx'
-       AND status = 'CLOSED'
        AND invested_usdt > 0
-       AND (commission_usdt > invested_usdt * 0.05 OR ABS(pl_usdt) > invested_usdt * 2)`,
+       AND (
+         commission_usdt > invested_usdt * 0.05
+         OR ABS(pl_usdt) > invested_usdt * 2
+         OR ABS((qty * entry_price) - invested_usdt) > invested_usdt * 0.1
+       )`,
     [profile.id]
   );
   if (Number(suspiciousRow?.cnt || 0) > 0) {
