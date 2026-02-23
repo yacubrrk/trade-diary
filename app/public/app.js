@@ -49,6 +49,7 @@ let authToken = localStorage.getItem(STORAGE_TOKEN_KEY) || '';
 let lastSeenTradeId = 0;
 let latestTradeId = 0;
 let autoRefreshTimer = null;
+let warmupRefreshTimer = null;
 let currentProfileName = '';
 let currentProfileId = 0;
 let currentExchange = 'BYBIT';
@@ -105,6 +106,7 @@ function setLoggedOutView() {
   $bottomNav.classList.add('hidden');
   $profileSettingsPanel.classList.add('hidden');
   stopAutoRefreshLoop();
+  stopWarmupRefreshLoop();
   setNewTradesIndicator(0);
   $tbody.innerHTML = '';
   $mobileTrades.innerHTML = '';
@@ -512,6 +514,25 @@ function stopAutoRefreshLoop() {
   autoRefreshTimer = null;
 }
 
+function stopWarmupRefreshLoop() {
+  if (!warmupRefreshTimer) return;
+  clearInterval(warmupRefreshTimer);
+  warmupRefreshTimer = null;
+}
+
+function startWarmupRefreshLoop() {
+  if (warmupRefreshTimer) clearInterval(warmupRefreshTimer);
+  let ticks = 0;
+  warmupRefreshTimer = setInterval(() => {
+    ticks += 1;
+    autoSyncAndRefresh().catch(() => {});
+    if (ticks >= 12) {
+      clearInterval(warmupRefreshTimer);
+      warmupRefreshTimer = null;
+    }
+  }, 5000);
+}
+
 $authForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const submitBtn = $authForm.querySelector('button[type="submit"]');
@@ -538,6 +559,7 @@ $authForm.addEventListener('submit', async (e) => {
     localStorage.setItem(STORAGE_TOKEN_KEY, authToken);
     setLoggedInView(result.profile);
     await refreshAll();
+    startWarmupRefreshLoop();
     $authForm.reset();
   } catch (err) {
     alert(err.message);
@@ -553,6 +575,7 @@ $changeKeysBtn.addEventListener('click', () => {
   api('/api/auth/logout', { method: 'POST' }).catch(() => {});
   authToken = '';
   localStorage.removeItem(STORAGE_TOKEN_KEY);
+  stopWarmupRefreshLoop();
   setLoggedOutView();
 });
 
@@ -577,6 +600,7 @@ $switchProfileBtn.addEventListener('click', async () => {
     localStorage.setItem(STORAGE_TOKEN_KEY, authToken);
     setLoggedInView(result.profile);
     await autoSyncAndRefresh();
+    startWarmupRefreshLoop();
     await loadProfileSwitchOptions();
   } catch (err) {
     alert(err.message);
@@ -650,6 +674,7 @@ async function bootstrap() {
     const profile = await api('/api/auth/me');
     setLoggedInView(profile);
     await autoSyncAndRefresh();
+    startWarmupRefreshLoop();
   } catch (_err) {
     authToken = '';
     localStorage.removeItem(STORAGE_TOKEN_KEY);
