@@ -120,81 +120,6 @@ async function fetchOkxSpotFillsAll({
   return all;
 }
 
-async function fetchOkxSpotFillsArchive({
-  apiKey,
-  apiSecret,
-  apiPassphrase,
-  baseUrl,
-  beginMs,
-  endMs,
-  limit = 100,
-}) {
-  const body = await okxRequest({
-    method: 'GET',
-    path: '/api/v5/trade/fills-archive',
-    apiKey,
-    apiSecret,
-    apiPassphrase,
-    baseUrl,
-    query: {
-      instType: 'SPOT',
-      begin: beginMs,
-      end: endMs,
-      limit: Math.max(1, Math.min(100, Number(limit || 100))),
-    },
-  });
-
-  return Array.isArray(body.data) ? body.data : [];
-}
-
-async function fetchOkxSpotFillsBackfill({
-  apiKey,
-  apiSecret,
-  apiPassphrase,
-  baseUrl,
-  lookbackDays = 3650,
-  windowDays = 90,
-}) {
-  const all = [];
-
-  const recent = await fetchOkxSpotFillsAll({
-    apiKey,
-    apiSecret,
-    apiPassphrase,
-    baseUrl,
-    pageLimit: 100,
-    maxPages: 400,
-  });
-  all.push(...recent);
-
-  const now = Date.now();
-  const safeWindowDays = Math.max(1, Math.min(90, Number(windowDays || 90)));
-  const safeLookbackDays = Math.max(safeWindowDays, Number(lookbackDays || 3650));
-  const stepMs = safeWindowDays * 24 * 60 * 60 * 1000;
-  const startBoundary = now - safeLookbackDays * 24 * 60 * 60 * 1000;
-
-  for (let endTime = now; endTime > startBoundary; endTime -= stepMs) {
-    const beginTime = Math.max(startBoundary, endTime - stepMs);
-    try {
-      const archive = await fetchOkxSpotFillsArchive({
-        apiKey,
-        apiSecret,
-        apiPassphrase,
-        baseUrl,
-        beginMs: beginTime,
-        endMs: endTime,
-        limit: 100,
-      });
-      all.push(...archive);
-    } catch (_err) {
-      // Some accounts/exchanges can reject archive endpoint; keep recent history as fallback.
-      break;
-    }
-  }
-
-  return all;
-}
-
 async function fetchOkxWalletBalance({ apiKey, apiSecret, apiPassphrase, baseUrl }) {
   const trading = await okxRequest({
     method: 'GET',
@@ -228,6 +153,5 @@ async function fetchOkxWalletBalance({ apiKey, apiSecret, apiPassphrase, baseUrl
 module.exports = {
   fetchOkxSpotFills,
   fetchOkxSpotFillsAll,
-  fetchOkxSpotFillsBackfill,
   fetchOkxWalletBalance,
 };

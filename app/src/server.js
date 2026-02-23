@@ -4,8 +4,8 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { getDb } = require('./db');
-const { fetchBybitExecutionsAll, fetchBybitExecutionsBackfill, fetchBybitWalletBalance, fetchBybitP2POrders } = require('./bybit');
-const { fetchOkxSpotFillsAll, fetchOkxSpotFillsBackfill, fetchOkxWalletBalance } = require('./okx');
+const { fetchBybitExecutionsAll, fetchBybitWalletBalance, fetchBybitP2POrders } = require('./bybit');
+const { fetchOkxSpotFillsAll, fetchOkxWalletBalance } = require('./okx');
 
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
@@ -449,7 +449,7 @@ function normalizeOkxExecutions(fills) {
     .sort((a, b) => toNum(a.execTime) - toNum(b.execTime));
 }
 
-async function syncBybitForProfile(db, profile, options = {}) {
+async function syncBybitForProfile(db, profile) {
   const exchange = normalizeExchange(profile.exchange);
   if (exchange !== EXCHANGES.BYBIT) {
     return { skipped: true, reason: `sync is not implemented for ${exchange}` };
@@ -460,28 +460,14 @@ async function syncBybitForProfile(db, profile, options = {}) {
   const recvWindow = Number(profile.recv_window || 5000);
   const baseUrl = profile.base_url || DEFAULT_BASE_URL[EXCHANGES.BYBIT];
 
-  const fullHistory = Boolean(options.fullHistory);
-  const executions = fullHistory
-    ? await fetchBybitExecutionsBackfill({
-        apiKey,
-        apiSecret,
-        baseUrl,
-        recvWindow,
-        lookbackDays: 3650,
-        windowDays: 7,
-        pageLimit: 200,
-        maxPagesPerWindow: 20,
-      })
-    : await fetchBybitExecutionsAll({
-        apiKey,
-        apiSecret,
-        baseUrl,
-        recvWindow,
-        startTime: Date.now() - 30 * 24 * 60 * 60 * 1000,
-        endTime: Date.now(),
-        pageLimit: 200,
-        maxPages: 20,
-      });
+  const executions = await fetchBybitExecutionsAll({
+    apiKey,
+    apiSecret,
+    baseUrl,
+    recvWindow,
+    pageLimit: 200,
+    maxPages: 400,
+  });
 
   const sorted = normalizeExecutions(executions);
 
@@ -547,14 +533,10 @@ async function syncBybitForProfile(db, profile, options = {}) {
   }
 
   const dust_closed = await closeDustOpenTrades(db, profile.id);
-  await db.run('UPDATE profiles SET last_sync_at = ?, history_synced_once = CASE WHEN ? THEN 1 ELSE history_synced_once END WHERE id = ?', [
-    Date.now(),
-    fullHistory ? 1 : 0,
-    profile.id,
-  ]);
+  await db.run('UPDATE profiles SET last_sync_at = ? WHERE id = ?', [Date.now(), profile.id]);
 
   return {
-    sync_scope: fullHistory ? 'full_available_history' : 'incremental_30d',
+    sync_scope: 'full_available_history',
     executions_received: sorted.length,
     buys_created: createdBuys,
     sell_matches_closed: closedFromSells,
@@ -563,7 +545,7 @@ async function syncBybitForProfile(db, profile, options = {}) {
   };
 }
 
-async function syncOkxForProfile(db, profile, options = {}) {
+async function syncOkxForProfile(db, profile) {
   const apiKey = profile.api_key;
   const apiSecret = profile.api_secret;
   const apiPassphrase = String(profile.api_passphrase || '').trim();
@@ -572,24 +554,14 @@ async function syncOkxForProfile(db, profile, options = {}) {
     throw new Error('api_passphrase is required for OKX profile');
   }
 
-  const fullHistory = Boolean(options.fullHistory);
-  const fills = fullHistory
-    ? await fetchOkxSpotFillsBackfill({
-        apiKey,
-        apiSecret,
-        apiPassphrase,
-        baseUrl,
-        lookbackDays: 3650,
-        windowDays: 90,
-      })
-    : await fetchOkxSpotFillsAll({
-        apiKey,
-        apiSecret,
-        apiPassphrase,
-        baseUrl,
-        pageLimit: 100,
-        maxPages: 40,
-      });
+  const fills = await fetchOkxSpotFillsAll({
+    apiKey,
+    apiSecret,
+    apiPassphrase,
+    baseUrl,
+    pageLimit: 100,
+    maxPages: 400,
+  });
 
   const sorted = normalizeOkxExecutions(fills);
 
@@ -655,14 +627,10 @@ async function syncOkxForProfile(db, profile, options = {}) {
   }
 
   const dust_closed = await closeDustOpenTrades(db, profile.id);
-  await db.run('UPDATE profiles SET last_sync_at = ?, history_synced_once = CASE WHEN ? THEN 1 ELSE history_synced_once END WHERE id = ?', [
-    Date.now(),
-    fullHistory ? 1 : 0,
-    profile.id,
-  ]);
+  await db.run('UPDATE profiles SET last_sync_at = ? WHERE id = ?', [Date.now(), profile.id]);
 
   return {
-    sync_scope: fullHistory ? 'full_available_history' : 'incremental_recent',
+    sync_scope: 'full_available_history',
     executions_received: sorted.length,
     buys_created: createdBuys,
     sell_matches_closed: closedFromSells,
@@ -671,19 +639,15 @@ async function syncOkxForProfile(db, profile, options = {}) {
   };
 }
 
-async function syncForProfile(db, profile, options = {}) {
+async function syncForProfile(db, profile) {
   const exchange = normalizeExchange(profile.exchange);
   if (exchange === EXCHANGES.OKX) {
-    return syncOkxForProfile(db, profile, options);
+    return syncOkxForProfile(db, profile);
   }
-  return syncBybitForProfile(db, profile, options);
+  return syncBybitForProfile(db, profile);
 }
 
 async function syncForProfileIfStale(db, profile) {
-  const historySynced = Number(profile.history_synced_once || 0) === 1;
-  if (!historySynced) {
-    return syncForProfile(db, profile, { fullHistory: true });
-  }
   const lastSyncAt = Number(profile.last_sync_at || 0);
   const now = Date.now();
   if (now - lastSyncAt < PROFILE_SYNC_MIN_GAP_MS) {
@@ -776,7 +740,7 @@ app.post('/api/auth/register', async (req, res) => {
     if (existing) {
       await db.run(
         `UPDATE profiles
-         SET exchange = ?, api_secret = ?, api_passphrase = ?, base_url = ?, recv_window = ?, tg_user_id = COALESCE(?, tg_user_id), profile_name = COALESCE(NULLIF(?, ''), profile_name), last_selected_at = ?, history_synced_once = 0, last_sync_at = 0
+         SET exchange = ?, api_secret = ?, api_passphrase = ?, base_url = ?, recv_window = ?, tg_user_id = COALESCE(?, tg_user_id), profile_name = COALESCE(NULLIF(?, ''), profile_name), last_selected_at = ?
          WHERE id = ?`,
         [exchange, apiSecret, apiPassphrase || null, baseUrl, recvWindow, tgUserId, profileName, now, existing.id]
       );

@@ -27,7 +27,6 @@ async function getDb() {
         api_passphrase TEXT,
         base_url TEXT NOT NULL,
         recv_window INTEGER NOT NULL DEFAULT 5000,
-        history_synced_once INTEGER NOT NULL DEFAULT 0,
         last_read_trade_id INTEGER NOT NULL DEFAULT 0,
         last_selected_at INTEGER NOT NULL DEFAULT 0,
         last_sync_at INTEGER NOT NULL DEFAULT 0,
@@ -97,10 +96,6 @@ async function getDb() {
     const hasProfileName = profileColumns.some((c) => c.name === 'profile_name');
     if (!hasProfileName) {
       await db.exec(`ALTER TABLE profiles ADD COLUMN profile_name TEXT`);
-    }
-    const hasHistorySyncedOnce = profileColumns.some((c) => c.name === 'history_synced_once');
-    if (!hasHistorySyncedOnce) {
-      await db.exec(`ALTER TABLE profiles ADD COLUMN history_synced_once INTEGER NOT NULL DEFAULT 0`);
     }
 
     const hasExchange = profileColumns.some((c) => c.name === 'exchange');
