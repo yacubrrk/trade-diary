@@ -11,12 +11,18 @@
     <main class="container app-shell">
       <section class="hero">
         <h1 class="app-title">Trade Diary</h1>
-        <p class="app-subtitle">Bybit Journal</p>
+        <p class="app-subtitle">Bybit + OKX Journal</p>
       </section>
 
       <section class="card auth-card" id="auth-card">
-        <h2 class="auth-title">Подключение аккаунта Bybit</h2>
+        <h2 class="auth-title">Подключение аккаунта биржи</h2>
         <form id="auth-form" class="auth-form">
+          <label class="auth-label" for="exchange-input">Биржа</label>
+          <select id="exchange-input" name="exchange" required>
+            <option value="BYBIT" selected>Bybit</option>
+            <option value="OKX">OKX</option>
+          </select>
+
           <label class="auth-label" for="api-key-input">Ключ API</label>
           <input id="api-key-input" type="text" name="api_key" placeholder="Вставьте API Key" required />
 
@@ -29,9 +35,19 @@
             required
           />
 
-          <button class="auth-submit" type="submit">Войти и синхронизировать</button>
+          <div id="okx-passphrase-wrap" class="hidden">
+            <label class="auth-label" for="api-passphrase-input">API Passphrase (OKX)</label>
+            <input
+              id="api-passphrase-input"
+              type="password"
+              name="api_passphrase"
+              placeholder="Вставьте API Passphrase"
+            />
+          </div>
+
+          <button class="auth-submit" type="submit">Войти</button>
         </form>
-        <p class="hint auth-hint">Ключи используются только для чтения истории сделок.</p>
+        <p class="hint auth-hint">Ключи используются только для чтения. Для OKX нужен API Passphrase. Синхронизация сделок сейчас доступна для Bybit.</p>
       </section>
 
       <div id="app-sections" class="hidden">

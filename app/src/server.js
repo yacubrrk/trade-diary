@@ -23,6 +23,14 @@ const toNum = (v, d = 0) => {
 const roundMoney = (n) => Math.round((n + Number.EPSILON) * 1000000) / 1000000;
 const roundQty = (n) => Math.round((n + Number.EPSILON) * 1000000000000) / 1000000000000;
 const DUST_QTY = 0.000001;
+const EXCHANGES = {
+  BYBIT: 'BYBIT',
+  OKX: 'OKX',
+};
+const DEFAULT_BASE_URL = {
+  [EXCHANGES.BYBIT]: 'https://api.bybit.com',
+  [EXCHANGES.OKX]: 'https://www.okx.com',
+};
 const AUTO_SYNC_ENABLED = String(process.env.AUTO_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
 const AUTO_SYNC_INTERVAL_MINUTES = Math.max(5, Number(process.env.AUTO_SYNC_INTERVAL_MINUTES || 30));
 const AUTO_SYNC_DAYS = Math.max(1, Math.min(7, Number(process.env.AUTO_SYNC_DAYS || 2)));
@@ -44,6 +52,11 @@ function buildClosedMetrics({ qty, entryPrice, exitPrice, entryCommission, exitC
     pl_percent: roundMoney(plPercent),
     duration_minutes: durationMinutes,
   };
+}
+
+function normalizeExchange(input) {
+  const value = String(input || EXCHANGES.BYBIT).trim().toUpperCase();
+  return value === EXCHANGES.OKX ? EXCHANGES.OKX : EXCHANGES.BYBIT;
 }
 
 function makePublicId() {
@@ -90,11 +103,13 @@ function clearAuthCookie(res) {
 
 function mapProfileResponse(profile) {
   const apiKey = String(profile.api_key || '');
+  const exchange = normalizeExchange(profile.exchange);
   return {
     id: profile.id,
+    exchange,
     api_key_masked: apiKey ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}` : '',
     profile_name: profile.profile_name || null,
-    base_url: profile.base_url,
+    base_url: profile.base_url || DEFAULT_BASE_URL[exchange],
     last_read_trade_id: Number(profile.last_read_trade_id || 0),
   };
 }
@@ -381,10 +396,15 @@ function normalizeExecutions(executions) {
 }
 
 async function syncBybitForProfile(db, profile, days) {
+  const exchange = normalizeExchange(profile.exchange);
+  if (exchange !== EXCHANGES.BYBIT) {
+    return { skipped: true, reason: `sync is not implemented for ${exchange}` };
+  }
+
   const apiKey = profile.api_key;
   const apiSecret = profile.api_secret;
   const recvWindow = Number(profile.recv_window || 5000);
-  const baseUrl = profile.base_url || 'https://api.bybit.com';
+  const baseUrl = profile.base_url || DEFAULT_BASE_URL[EXCHANGES.BYBIT];
 
   const safeDays = Math.max(1, Math.min(30, Number(days || 7)));
   const endTime = Date.now();
@@ -477,6 +497,11 @@ async function syncBybitForProfile(db, profile, days) {
 }
 
 async function syncBybitForProfileIfStale(db, profile, days = AUTO_SYNC_DAYS) {
+  const exchange = normalizeExchange(profile.exchange);
+  if (exchange !== EXCHANGES.BYBIT) {
+    return { skipped: true, reason: `sync is not implemented for ${exchange}` };
+  }
+
   const lastSyncAt = Number(profile.last_sync_at || 0);
   const now = Date.now();
   if (now - lastSyncAt < PROFILE_SYNC_MIN_GAP_MS) {
@@ -523,10 +548,12 @@ app.get('/api/health', (_req, res) => {
 app.post('/api/auth/register', async (req, res) => {
   try {
     const db = await getDb();
+    const exchange = normalizeExchange(req.body.exchange);
     const apiKey = String(req.body.api_key || '').trim();
     const apiSecret = String(req.body.api_secret || '').trim();
+    const apiPassphrase = String(req.body.api_passphrase || '').trim();
     const profileName = String(req.body.profile_name || '').trim();
-    const baseUrl = String(req.body.base_url || 'https://api.bybit.com').trim();
+    const baseUrl = String(req.body.base_url || DEFAULT_BASE_URL[exchange]).trim();
     const recvWindow = Math.max(1000, Math.min(15000, Number(req.body.recv_window || 5000)));
     const tgUserId = String(req.body.tg_user_id || '').trim() || null;
     const now = Date.now();
@@ -534,15 +561,18 @@ app.post('/api/auth/register', async (req, res) => {
     if (!apiKey || !apiSecret) {
       return res.status(400).json({ error: 'api_key and api_secret are required' });
     }
+    if (exchange === EXCHANGES.OKX && !apiPassphrase) {
+      return res.status(400).json({ error: 'api_passphrase is required for OKX' });
+    }
 
     const existing = await db.get('SELECT * FROM profiles WHERE api_key = ? LIMIT 1', [apiKey]);
 
     if (existing) {
       await db.run(
         `UPDATE profiles
-         SET api_secret = ?, base_url = ?, recv_window = ?, tg_user_id = COALESCE(?, tg_user_id), profile_name = COALESCE(NULLIF(?, ''), profile_name), last_selected_at = ?
+         SET exchange = ?, api_secret = ?, api_passphrase = ?, base_url = ?, recv_window = ?, tg_user_id = COALESCE(?, tg_user_id), profile_name = COALESCE(NULLIF(?, ''), profile_name), last_selected_at = ?
          WHERE id = ?`,
-        [apiSecret, baseUrl, recvWindow, tgUserId, profileName, now, existing.id]
+        [exchange, apiSecret, apiPassphrase || null, baseUrl, recvWindow, tgUserId, profileName, now, existing.id]
       );
       setAuthCookie(res, existing.public_id);
       const refreshed = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [existing.id]);
@@ -570,9 +600,9 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     const result = await db.run(
-      `INSERT INTO profiles (public_id, tg_user_id, profile_name, api_key, api_secret, base_url, recv_window, last_selected_at, last_sync_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-      [publicId, tgUserId, profileName || null, apiKey, apiSecret, baseUrl, recvWindow, now, now]
+      `INSERT INTO profiles (public_id, tg_user_id, profile_name, exchange, api_key, api_secret, api_passphrase, base_url, recv_window, last_selected_at, last_sync_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+      [publicId, tgUserId, profileName || null, exchange, apiKey, apiSecret, apiPassphrase || null, baseUrl, recvWindow, now, now]
     );
     setAuthCookie(res, publicId);
     const createdProfile = await db.get('SELECT * FROM profiles WHERE id = ? LIMIT 1', [result.lastID]);
@@ -772,6 +802,9 @@ app.get('/api/stats', requireProfile, async (req, res) => {
 app.post('/api/bybit/sync', requireProfile, async (req, res) => {
   try {
     const db = await getDb();
+    if (normalizeExchange(req.profile.exchange) !== EXCHANGES.BYBIT) {
+      return res.status(400).json({ error: 'Endpoint supports only BYBIT profiles' });
+    }
     const days = Math.max(1, Math.min(30, Number(req.body.days || 7)));
     const result = await syncBybitForProfile(db, req.profile, days);
     res.json(result);
@@ -821,10 +854,22 @@ app.post('/api/profile/name', requireProfile, async (req, res) => {
 
 app.get('/api/balance', requireProfile, async (req, res) => {
   try {
+    const exchange = normalizeExchange(req.profile.exchange);
+    if (exchange !== EXCHANGES.BYBIT) {
+      return res.json({
+        exchange,
+        supported: false,
+        message: `Balance sync for ${exchange} is not implemented yet`,
+        unified_total_usd: 0,
+        unified_coins: [],
+        fund_coins: [],
+      });
+    }
+
     const result = await fetchBybitWalletBalance({
       apiKey: req.profile.api_key,
       apiSecret: req.profile.api_secret,
-      baseUrl: req.profile.base_url || 'https://api.bybit.com',
+      baseUrl: req.profile.base_url || DEFAULT_BASE_URL[EXCHANGES.BYBIT],
       recvWindow: Number(req.profile.recv_window || 5000),
     });
 
@@ -862,6 +907,16 @@ app.get('/api/balance', requireProfile, async (req, res) => {
 
 app.get('/api/p2p/orders', requireProfile, async (req, res) => {
   try {
+    const exchange = normalizeExchange(req.profile.exchange);
+    if (exchange !== EXCHANGES.BYBIT) {
+      return res.json({
+        exchange,
+        supported: false,
+        total: 0,
+        rows: [],
+      });
+    }
+
     const days = Math.max(1, Math.min(30, Number(req.query.days || 7)));
     const endTime = Date.now();
     const beginTime = endTime - days * 24 * 60 * 60 * 1000;
@@ -869,7 +924,7 @@ app.get('/api/p2p/orders', requireProfile, async (req, res) => {
     const result = await fetchBybitP2POrders({
       apiKey: req.profile.api_key,
       apiSecret: req.profile.api_secret,
-      baseUrl: req.profile.base_url || 'https://api.bybit.com',
+      baseUrl: req.profile.base_url || DEFAULT_BASE_URL[EXCHANGES.BYBIT],
       recvWindow: Number(req.profile.recv_window || 5000),
       page: 1,
       size: 30,

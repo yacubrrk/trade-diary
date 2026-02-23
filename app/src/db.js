@@ -21,8 +21,10 @@ async function getDb() {
         public_id TEXT NOT NULL UNIQUE,
         tg_user_id TEXT,
         profile_name TEXT,
+        exchange TEXT NOT NULL DEFAULT 'BYBIT',
         api_key TEXT NOT NULL UNIQUE,
         api_secret TEXT NOT NULL,
+        api_passphrase TEXT,
         base_url TEXT NOT NULL,
         recv_window INTEGER NOT NULL DEFAULT 5000,
         last_read_trade_id INTEGER NOT NULL DEFAULT 0,
@@ -94,6 +96,17 @@ async function getDb() {
     const hasProfileName = profileColumns.some((c) => c.name === 'profile_name');
     if (!hasProfileName) {
       await db.exec(`ALTER TABLE profiles ADD COLUMN profile_name TEXT`);
+    }
+
+    const hasExchange = profileColumns.some((c) => c.name === 'exchange');
+    if (!hasExchange) {
+      await db.exec(`ALTER TABLE profiles ADD COLUMN exchange TEXT NOT NULL DEFAULT 'BYBIT'`);
+      await db.run(`UPDATE profiles SET exchange = 'BYBIT' WHERE exchange IS NULL OR exchange = ''`);
+    }
+
+    const hasApiPassphrase = profileColumns.some((c) => c.name === 'api_passphrase');
+    if (!hasApiPassphrase) {
+      await db.exec(`ALTER TABLE profiles ADD COLUMN api_passphrase TEXT`);
     }
   }
 
